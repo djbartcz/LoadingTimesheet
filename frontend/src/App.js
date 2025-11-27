@@ -1,38 +1,362 @@
-import { useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import "@/App.css";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, useNavigate, useParams } from "react-router-dom";
 import axios from "axios";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Toaster } from "@/components/ui/sonner";
+import { toast } from "sonner";
+import { Play, Square, Clock, User, Briefcase, Package } from "lucide-react";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
 
-const Home = () => {
-  const helloWorldApi = async () => {
+// Employee Selection Page
+const EmployeeSelection = () => {
+  const [employees, setEmployees] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    const fetchEmployees = async () => {
+      try {
+        const response = await axios.get(`${API}/employees`);
+        setEmployees(response.data);
+      } catch (e) {
+        console.error("Error fetching employees:", e);
+        toast.error("Nepodařilo se načíst zaměstnance");
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchEmployees();
+  }, []);
+
+  const handleSelectEmployee = (employee) => {
+    localStorage.setItem('selectedEmployee', JSON.stringify(employee));
+    navigate(`/employee/${employee.id}`);
+  };
+
+  if (loading) {
+    return (
+      <div className="loading-container" data-testid="loading-spinner">
+        <div className="spinner"></div>
+        <p>Načítání...</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="employee-selection" data-testid="employee-selection-page">
+      <div className="header">
+        <Clock className="header-icon" />
+        <h1>Časomíra nakládky</h1>
+        <p>Vyberte své jméno pro zahájení</p>
+      </div>
+      
+      <div className="employees-grid">
+        {employees.length === 0 ? (
+          <div className="empty-state" data-testid="no-employees">
+            <User size={48} />
+            <p>Žádní zaměstnanci</p>
+            <span>Přidejte zaměstnance do Google Sheets</span>
+          </div>
+        ) : (
+          employees.map((employee) => (
+            <button
+              key={employee.id}
+              className="employee-button"
+              onClick={() => handleSelectEmployee(employee)}
+              data-testid={`employee-btn-${employee.id}`}
+            >
+              <User className="employee-icon" />
+              <span className="employee-name">{employee.name}</span>
+            </button>
+          ))
+        )}
+      </div>
+    </div>
+  );
+};
+
+// Timer Page
+const TimerPage = () => {
+  const { employeeId } = useParams();
+  const navigate = useNavigate();
+  const [employee, setEmployee] = useState(null);
+  const [projects, setProjects] = useState([]);
+  const [tasks, setTasks] = useState([]);
+  const [selectedProject, setSelectedProject] = useState(null);
+  const [selectedTask, setSelectedTask] = useState(null);
+  const [isRunning, setIsRunning] = useState(false);
+  const [elapsedTime, setElapsedTime] = useState(0);
+  const [activeRecord, setActiveRecord] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  // Load employee from localStorage
+  useEffect(() => {
+    const stored = localStorage.getItem('selectedEmployee');
+    if (stored) {
+      const emp = JSON.parse(stored);
+      if (emp.id === employeeId) {
+        setEmployee(emp);
+      } else {
+        navigate('/');
+      }
+    } else {
+      navigate('/');
+    }
+  }, [employeeId, navigate]);
+
+  // Fetch projects and tasks
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        const [projectsRes, tasksRes] = await Promise.all([
+          axios.get(`${API}/projects`),
+          axios.get(`${API}/tasks`)
+        ]);
+        setProjects(projectsRes.data);
+        setTasks(tasksRes.data);
+      } catch (e) {
+        console.error("Error fetching data:", e);
+        toast.error("Nepodařilo se načíst data");
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchData();
+  }, []);
+
+  // Check for active timer on load
+  useEffect(() => {
+    const checkActiveTimer = async () => {
+      if (!employeeId) return;
+      try {
+        const response = await axios.get(`${API}/timer/active/${employeeId}`);
+        if (response.data) {
+          setActiveRecord(response.data);
+          setIsRunning(true);
+          setSelectedProject(projects.find(p => p.id === response.data.project_id) || null);
+          setSelectedTask(response.data.task);
+          
+          // Calculate elapsed time
+          const startTime = new Date(response.data.start_time).getTime();
+          const now = Date.now();
+          setElapsedTime(Math.floor((now - startTime) / 1000));
+        }
+      } catch (e) {
+        console.error("Error checking active timer:", e);
+      }
+    };
+    if (projects.length > 0) {
+      checkActiveTimer();
+    }
+  }, [employeeId, projects]);
+
+  // Timer effect
+  useEffect(() => {
+    let interval;
+    if (isRunning) {
+      interval = setInterval(() => {
+        setElapsedTime(prev => prev + 1);
+      }, 1000);
+    }
+    return () => clearInterval(interval);
+  }, [isRunning]);
+
+  const formatTime = useCallback((seconds) => {
+    const hrs = Math.floor(seconds / 3600);
+    const mins = Math.floor((seconds % 3600) / 60);
+    const secs = seconds % 60;
+    return `${hrs.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  }, []);
+
+  const handleStart = async () => {
+    if (!selectedProject || !selectedTask) {
+      toast.error("Vyberte projekt a úkon");
+      return;
+    }
+
     try {
-      const response = await axios.get(`${API}/`);
-      console.log(response.data.message);
+      const response = await axios.post(`${API}/timer/start`, {
+        employee_id: employee.id,
+        employee_name: employee.name,
+        project_id: selectedProject.id,
+        project_name: selectedProject.name,
+        task: selectedTask
+      });
+      
+      setActiveRecord(response.data);
+      setIsRunning(true);
+      setElapsedTime(0);
+      toast.success("Časomíra spuštěna");
     } catch (e) {
-      console.error(e, `errored out requesting / api`);
+      console.error("Error starting timer:", e);
+      toast.error("Nepodařilo se spustit časomíru");
     }
   };
 
-  useEffect(() => {
-    helloWorldApi();
-  }, []);
+  const handleStop = async () => {
+    if (!activeRecord) return;
+
+    try {
+      await axios.post(`${API}/timer/stop`, {
+        record_id: activeRecord.id,
+        end_time: new Date().toISOString(),
+        duration_seconds: elapsedTime
+      });
+      
+      setIsRunning(false);
+      setActiveRecord(null);
+      setElapsedTime(0);
+      setSelectedProject(null);
+      setSelectedTask(null);
+      toast.success("Čas uložen do Google Sheets");
+    } catch (e) {
+      console.error("Error stopping timer:", e);
+      toast.error("Nepodařilo se zastavit časomíru");
+    }
+  };
+
+  const handleBack = () => {
+    if (isRunning) {
+      toast.error("Nejprve zastavte časomíru");
+      return;
+    }
+    localStorage.removeItem('selectedEmployee');
+    navigate('/');
+  };
+
+  if (loading || !employee) {
+    return (
+      <div className="loading-container" data-testid="loading-spinner">
+        <div className="spinner"></div>
+        <p>Načítání...</p>
+      </div>
+    );
+  }
 
   return (
-    <div>
-      <header className="App-header">
-        <a
-          className="App-link"
-          href="https://emergent.sh"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <img src="https://avatars.githubusercontent.com/in/1201222?s=120&u=2686cf91179bbafbc7a71bfbc43004cf9ae1acea&v=4" />
-        </a>
-        <p className="mt-5">Building something incredible ~!</p>
-      </header>
+    <div className="timer-page" data-testid="timer-page">
+      <div className="timer-header">
+        <button className="back-button" onClick={handleBack} data-testid="back-button">
+          ← Zpět
+        </button>
+        <div className="employee-info">
+          <User className="user-icon" />
+          <span data-testid="employee-name">{employee.name}</span>
+        </div>
+      </div>
+
+      {/* Active Timer Display */}
+      <Card className={`timer-card ${isRunning ? 'running' : ''}`} data-testid="timer-card">
+        <CardHeader>
+          <CardTitle className="timer-title">
+            <Clock className="clock-icon" />
+            Časomíra
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="timer-display" data-testid="timer-display">
+            {formatTime(elapsedTime)}
+          </div>
+          {isRunning && activeRecord && (
+            <div className="active-info" data-testid="active-timer-info">
+              <div className="info-row">
+                <Briefcase size={18} />
+                <span>{activeRecord.project_name}</span>
+              </div>
+              <div className="info-row">
+                <Package size={18} />
+                <span>{activeRecord.task}</span>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Selection Controls - Only visible when timer is not running */}
+      {!isRunning && (
+        <div className="selection-section" data-testid="selection-section">
+          <Card className="selection-card">
+            <CardHeader>
+              <CardTitle>
+                <Briefcase className="section-icon" />
+                Projekt
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <Select
+                value={selectedProject?.id || ""}
+                onValueChange={(value) => {
+                  const project = projects.find(p => p.id === value);
+                  setSelectedProject(project);
+                }}
+              >
+                <SelectTrigger className="select-trigger" data-testid="project-select">
+                  <SelectValue placeholder="Vyberte projekt" />
+                </SelectTrigger>
+                <SelectContent>
+                  {projects.map((project) => (
+                    <SelectItem key={project.id} value={project.id} data-testid={`project-option-${project.id}`}>
+                      {project.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </CardContent>
+          </Card>
+
+          <Card className="selection-card">
+            <CardHeader>
+              <CardTitle>
+                <Package className="section-icon" />
+                Úkon
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="task-grid">
+                {tasks.map((task) => (
+                  <button
+                    key={task.name}
+                    className={`task-button ${selectedTask === task.name ? 'selected' : ''}`}
+                    onClick={() => setSelectedTask(task.name)}
+                    data-testid={`task-btn-${task.name}`}
+                  >
+                    {task.name}
+                  </button>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* Action Buttons */}
+      <div className="action-buttons">
+        {!isRunning ? (
+          <Button
+            className="start-button"
+            onClick={handleStart}
+            disabled={!selectedProject || !selectedTask}
+            data-testid="start-button"
+          >
+            <Play size={24} />
+            START
+          </Button>
+        ) : (
+          <Button
+            className="stop-button"
+            onClick={handleStop}
+            data-testid="stop-button"
+          >
+            <Square size={24} />
+            STOP
+          </Button>
+        )}
+      </div>
     </div>
   );
 };
@@ -42,11 +366,11 @@ function App() {
     <div className="App">
       <BrowserRouter>
         <Routes>
-          <Route path="/" element={<Home />}>
-            <Route index element={<Home />} />
-          </Route>
+          <Route path="/" element={<EmployeeSelection />} />
+          <Route path="/employee/:employeeId" element={<TimerPage />} />
         </Routes>
       </BrowserRouter>
+      <Toaster position="top-center" richColors />
     </div>
   );
 }
