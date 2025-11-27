@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import "@/App.css";
 import { BrowserRouter, Routes, Route, useNavigate, useParams } from "react-router-dom";
 import axios from "axios";
@@ -7,25 +7,134 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
-import { Play, Square, Clock, User, Briefcase, Package, AlertTriangle, Wrench } from "lucide-react";
+import { Play, Square, Clock, User, Briefcase, Package, AlertTriangle, Wrench, WifiOff, Wifi, CloudOff, RefreshCw } from "lucide-react";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
+
+// Offline Storage Keys
+const STORAGE_KEYS = {
+  ACTIVE_TIMER: 'timesheet_active_timer',
+  PENDING_STOPS: 'timesheet_pending_stops',
+  SELECTED_EMPLOYEE: 'selectedEmployee'
+};
+
+// Offline Queue Manager
+const OfflineQueue = {
+  getPendingStops: () => {
+    try {
+      const data = localStorage.getItem(STORAGE_KEYS.PENDING_STOPS);
+      return data ? JSON.parse(data) : [];
+    } catch {
+      return [];
+    }
+  },
+  
+  addPendingStop: (stopData) => {
+    const pending = OfflineQueue.getPendingStops();
+    pending.push(stopData);
+    localStorage.setItem(STORAGE_KEYS.PENDING_STOPS, JSON.stringify(pending));
+  },
+  
+  removePendingStop: (recordId) => {
+    const pending = OfflineQueue.getPendingStops();
+    const filtered = pending.filter(p => p.record_id !== recordId);
+    localStorage.setItem(STORAGE_KEYS.PENDING_STOPS, JSON.stringify(filtered));
+  },
+  
+  clearPendingStops: () => {
+    localStorage.removeItem(STORAGE_KEYS.PENDING_STOPS);
+  }
+};
+
+// Local Timer Storage
+const TimerStorage = {
+  save: (timerData) => {
+    localStorage.setItem(STORAGE_KEYS.ACTIVE_TIMER, JSON.stringify(timerData));
+  },
+  
+  get: () => {
+    try {
+      const data = localStorage.getItem(STORAGE_KEYS.ACTIVE_TIMER);
+      return data ? JSON.parse(data) : null;
+    } catch {
+      return null;
+    }
+  },
+  
+  clear: () => {
+    localStorage.removeItem(STORAGE_KEYS.ACTIVE_TIMER);
+  }
+};
+
+// Online Status Hook
+const useOnlineStatus = () => {
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
+  
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+    
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+  
+  return isOnline;
+};
+
+// Connection Status Component
+const ConnectionStatus = ({ isOnline, pendingCount, onSync }) => {
+  if (isOnline && pendingCount === 0) return null;
+  
+  return (
+    <div className={`connection-status ${isOnline ? 'pending' : 'offline'}`} data-testid="connection-status">
+      {!isOnline ? (
+        <>
+          <WifiOff size={18} />
+          <span>Offline režim</span>
+        </>
+      ) : pendingCount > 0 ? (
+        <>
+          <RefreshCw size={18} className="spinning" />
+          <span>Synchronizuji ({pendingCount})...</span>
+        </>
+      ) : null}
+    </div>
+  );
+};
 
 // Employee Selection Page
 const EmployeeSelection = () => {
   const [employees, setEmployees] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const navigate = useNavigate();
+  const isOnline = useOnlineStatus();
 
   useEffect(() => {
     const fetchEmployees = async () => {
       try {
-        const response = await axios.get(`${API}/employees`);
+        const response = await axios.get(`${API}/employees`, { timeout: 10000 });
         setEmployees(response.data);
+        // Cache employees for offline use
+        localStorage.setItem('cached_employees', JSON.stringify(response.data));
+        setError(null);
       } catch (e) {
         console.error("Error fetching employees:", e);
-        toast.error("Nepodařilo se načíst zaměstnance");
+        // Try to load from cache
+        const cached = localStorage.getItem('cached_employees');
+        if (cached) {
+          setEmployees(JSON.parse(cached));
+          toast.info("Načteno z cache (offline)");
+        } else {
+          setError("Nepodařilo se načíst zaměstnance");
+          toast.error("Nepodařilo se načíst zaměstnance");
+        }
       } finally {
         setLoading(false);
       }
@@ -34,7 +143,7 @@ const EmployeeSelection = () => {
   }, []);
 
   const handleSelectEmployee = (employee) => {
-    localStorage.setItem('selectedEmployee', JSON.stringify(employee));
+    localStorage.setItem(STORAGE_KEYS.SELECTED_EMPLOYEE, JSON.stringify(employee));
     navigate(`/employee/${employee.id}`);
   };
 
@@ -49,6 +158,8 @@ const EmployeeSelection = () => {
 
   return (
     <div className="employee-selection" data-testid="employee-selection-page">
+      <ConnectionStatus isOnline={isOnline} pendingCount={0} />
+      
       <div className="header">
         <Clock className="header-icon" />
         <h1>Časomíra nakládky</h1>
@@ -59,7 +170,7 @@ const EmployeeSelection = () => {
         {employees.length === 0 ? (
           <div className="empty-state" data-testid="no-employees">
             <User size={48} />
-            <p>Žádní zaměstnanci</p>
+            <p>{error || "Žádní zaměstnanci"}</p>
             <span>Přidejte zaměstnance do Google Sheets</span>
           </div>
         ) : (
@@ -84,6 +195,7 @@ const EmployeeSelection = () => {
 const TimerPage = () => {
   const { employeeId } = useParams();
   const navigate = useNavigate();
+  const isOnline = useOnlineStatus();
   const [employee, setEmployee] = useState(null);
   const [projects, setProjects] = useState([]);
   const [tasks, setTasks] = useState([]);
@@ -91,15 +203,18 @@ const TimerPage = () => {
   const [selectedProject, setSelectedProject] = useState(null);
   const [selectedTask, setSelectedTask] = useState(null);
   const [selectedNonProductiveTask, setSelectedNonProductiveTask] = useState(null);
-  const [mode, setMode] = useState('productive'); // 'productive' or 'non-productive'
+  const [mode, setMode] = useState('productive');
   const [isRunning, setIsRunning] = useState(false);
   const [elapsedTime, setElapsedTime] = useState(0);
   const [activeRecord, setActiveRecord] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [pendingStops, setPendingStops] = useState([]);
+  const [syncing, setSyncing] = useState(false);
+  const syncingRef = useRef(false);
 
   // Load employee from localStorage
   useEffect(() => {
-    const stored = localStorage.getItem('selectedEmployee');
+    const stored = localStorage.getItem(STORAGE_KEYS.SELECTED_EMPLOYEE);
     if (stored) {
       const emp = JSON.parse(stored);
       if (emp.id === employeeId) {
@@ -112,21 +227,74 @@ const TimerPage = () => {
     }
   }, [employeeId, navigate]);
 
+  // Load pending stops count
+  useEffect(() => {
+    setPendingStops(OfflineQueue.getPendingStops());
+  }, []);
+
+  // Sync pending stops when online
+  useEffect(() => {
+    const syncPendingStops = async () => {
+      if (!isOnline || syncingRef.current) return;
+      
+      const pending = OfflineQueue.getPendingStops();
+      if (pending.length === 0) return;
+      
+      syncingRef.current = true;
+      setSyncing(true);
+      
+      for (const stopData of pending) {
+        try {
+          await axios.post(`${API}/timer/stop`, stopData, { timeout: 15000 });
+          OfflineQueue.removePendingStop(stopData.record_id);
+          toast.success(`Synchronizováno: ${stopData.task || 'záznam'}`);
+        } catch (e) {
+          console.error("Sync failed:", e);
+          // Keep in queue for retry
+        }
+      }
+      
+      setPendingStops(OfflineQueue.getPendingStops());
+      syncingRef.current = false;
+      setSyncing(false);
+    };
+    
+    syncPendingStops();
+  }, [isOnline]);
+
   // Fetch projects, tasks and non-productive tasks
   useEffect(() => {
     const fetchData = async () => {
       try {
         const [projectsRes, tasksRes, nonProductiveRes] = await Promise.all([
-          axios.get(`${API}/projects`),
-          axios.get(`${API}/tasks`),
-          axios.get(`${API}/non-productive-tasks`)
+          axios.get(`${API}/projects`, { timeout: 10000 }),
+          axios.get(`${API}/tasks`, { timeout: 10000 }),
+          axios.get(`${API}/non-productive-tasks`, { timeout: 10000 })
         ]);
         setProjects(projectsRes.data);
         setTasks(tasksRes.data);
         setNonProductiveTasks(nonProductiveRes.data);
+        
+        // Cache for offline
+        localStorage.setItem('cached_projects', JSON.stringify(projectsRes.data));
+        localStorage.setItem('cached_tasks', JSON.stringify(tasksRes.data));
+        localStorage.setItem('cached_nonproductive_tasks', JSON.stringify(nonProductiveRes.data));
       } catch (e) {
         console.error("Error fetching data:", e);
-        toast.error("Nepodařilo se načíst data");
+        // Load from cache
+        const cachedProjects = localStorage.getItem('cached_projects');
+        const cachedTasks = localStorage.getItem('cached_tasks');
+        const cachedNonProductive = localStorage.getItem('cached_nonproductive_tasks');
+        
+        if (cachedProjects) setProjects(JSON.parse(cachedProjects));
+        if (cachedTasks) setTasks(JSON.parse(cachedTasks));
+        if (cachedNonProductive) setNonProductiveTasks(JSON.parse(cachedNonProductive));
+        
+        if (cachedProjects || cachedTasks) {
+          toast.info("Načteno z cache (offline)");
+        } else {
+          toast.error("Nepodařilo se načíst data");
+        }
       } finally {
         setLoading(false);
       }
@@ -134,40 +302,71 @@ const TimerPage = () => {
     fetchData();
   }, []);
 
-  // Check for active timer on load
+  // Load timer from localStorage first, then check server
   useEffect(() => {
-    const checkActiveTimer = async () => {
-      if (!employeeId) return;
-      try {
-        const response = await axios.get(`${API}/timer/active/${employeeId}`);
-        if (response.data) {
-          setActiveRecord(response.data);
-          setIsRunning(true);
-          
-          if (response.data.is_non_productive) {
-            setMode('non-productive');
-            setSelectedNonProductiveTask(response.data.task);
-          } else {
-            setMode('productive');
-            setSelectedProject(projects.find(p => p.id === response.data.project_id) || null);
-            setSelectedTask(response.data.task);
-          }
-          
-          // Calculate elapsed time
-          const startTime = new Date(response.data.start_time).getTime();
-          const now = Date.now();
-          setElapsedTime(Math.floor((now - startTime) / 1000));
+    const loadTimer = async () => {
+      // First check localStorage
+      const localTimer = TimerStorage.get();
+      if (localTimer && localTimer.employee_id === employeeId) {
+        setActiveRecord(localTimer);
+        setIsRunning(true);
+        
+        if (localTimer.is_non_productive) {
+          setMode('non-productive');
+          setSelectedNonProductiveTask(localTimer.task);
+        } else {
+          setMode('productive');
+          setSelectedTask(localTimer.task);
         }
-      } catch (e) {
-        console.error("Error checking active timer:", e);
+        
+        // Calculate elapsed from stored start_time
+        const startTime = new Date(localTimer.start_time).getTime();
+        const now = Date.now();
+        setElapsedTime(Math.floor((now - startTime) / 1000));
+      }
+      
+      // Then try to sync with server if online
+      if (isOnline && employeeId) {
+        try {
+          const response = await axios.get(`${API}/timer/active/${employeeId}`, { timeout: 10000 });
+          if (response.data) {
+            const serverTimer = response.data;
+            setActiveRecord(serverTimer);
+            setIsRunning(true);
+            TimerStorage.save(serverTimer);
+            
+            if (serverTimer.is_non_productive) {
+              setMode('non-productive');
+              setSelectedNonProductiveTask(serverTimer.task);
+            } else {
+              setMode('productive');
+              const project = projects.find(p => p.id === serverTimer.project_id);
+              if (project) setSelectedProject(project);
+              setSelectedTask(serverTimer.task);
+            }
+            
+            const startTime = new Date(serverTimer.start_time).getTime();
+            const now = Date.now();
+            setElapsedTime(Math.floor((now - startTime) / 1000));
+          } else if (!localTimer) {
+            // No timer on server and no local timer
+            setIsRunning(false);
+            setActiveRecord(null);
+            TimerStorage.clear();
+          }
+        } catch (e) {
+          console.error("Error checking server timer:", e);
+          // Keep using local timer if exists
+        }
       }
     };
+    
     if (projects.length > 0 || nonProductiveTasks.length > 0) {
-      checkActiveTimer();
+      loadTimer();
     }
-  }, [employeeId, projects, nonProductiveTasks]);
+  }, [employeeId, projects, nonProductiveTasks, isOnline]);
 
-  // Timer effect
+  // Timer effect - runs locally
   useEffect(() => {
     let interval;
     if (isRunning) {
@@ -195,53 +394,94 @@ const TimerPage = () => {
       return;
     }
 
-    try {
-      const requestData = {
-        employee_id: employee.id,
-        employee_name: employee.name,
-        is_non_productive: mode === 'non-productive'
-      };
+    const startTime = new Date().toISOString();
+    const localRecord = {
+      id: `local_${Date.now()}`,
+      employee_id: employee.id,
+      employee_name: employee.name,
+      is_non_productive: mode === 'non-productive',
+      start_time: startTime,
+      task: mode === 'productive' ? selectedTask : selectedNonProductiveTask,
+      project_id: mode === 'productive' ? selectedProject?.id : null,
+      project_name: mode === 'productive' ? selectedProject?.name : null
+    };
 
-      if (mode === 'productive') {
-        requestData.project_id = selectedProject.id;
-        requestData.project_name = selectedProject.name;
-        requestData.task = selectedTask;
-      } else {
-        requestData.task = selectedNonProductiveTask;
+    // Save locally first
+    TimerStorage.save(localRecord);
+    setActiveRecord(localRecord);
+    setIsRunning(true);
+    setElapsedTime(0);
+
+    // Try to sync with server
+    if (isOnline) {
+      try {
+        const requestData = {
+          employee_id: employee.id,
+          employee_name: employee.name,
+          is_non_productive: mode === 'non-productive',
+          task: mode === 'productive' ? selectedTask : selectedNonProductiveTask
+        };
+
+        if (mode === 'productive') {
+          requestData.project_id = selectedProject.id;
+          requestData.project_name = selectedProject.name;
+        }
+
+        const response = await axios.post(`${API}/timer/start`, requestData, { timeout: 15000 });
+        
+        // Update with server response
+        const serverRecord = response.data;
+        TimerStorage.save(serverRecord);
+        setActiveRecord(serverRecord);
+        toast.success("Časomíra spuštěna");
+      } catch (e) {
+        console.error("Error starting timer on server:", e);
+        toast.warning("Spuštěno lokálně (offline)");
       }
-
-      const response = await axios.post(`${API}/timer/start`, requestData);
-      
-      setActiveRecord(response.data);
-      setIsRunning(true);
-      setElapsedTime(0);
-      toast.success("Časomíra spuštěna");
-    } catch (e) {
-      console.error("Error starting timer:", e);
-      toast.error("Nepodařilo se spustit časomíru");
+    } else {
+      toast.warning("Spuštěno lokálně (offline)");
     }
   };
 
   const handleStop = async () => {
     if (!activeRecord) return;
 
-    try {
-      await axios.post(`${API}/timer/stop`, {
-        record_id: activeRecord.id,
-        end_time: new Date().toISOString(),
-        duration_seconds: elapsedTime
-      });
-      
-      setIsRunning(false);
-      setActiveRecord(null);
-      setElapsedTime(0);
-      setSelectedProject(null);
-      setSelectedTask(null);
-      setSelectedNonProductiveTask(null);
-      toast.success("Čas uložen do Google Sheets");
-    } catch (e) {
-      console.error("Error stopping timer:", e);
-      toast.error("Nepodařilo se zastavit časomíru");
+    const endTime = new Date().toISOString();
+    const stopData = {
+      record_id: activeRecord.id,
+      end_time: endTime,
+      duration_seconds: elapsedTime,
+      // Store extra info for offline display
+      task: activeRecord.task,
+      project_name: activeRecord.project_name
+    };
+
+    // Clear local state
+    setIsRunning(false);
+    setActiveRecord(null);
+    setElapsedTime(0);
+    setSelectedProject(null);
+    setSelectedTask(null);
+    setSelectedNonProductiveTask(null);
+    TimerStorage.clear();
+
+    // Try to sync with server
+    if (isOnline) {
+      try {
+        await axios.post(`${API}/timer/stop`, stopData, { timeout: 15000 });
+        toast.success("Čas uložen do Google Sheets");
+      } catch (e) {
+        console.error("Error stopping timer on server:", e);
+        // Save to offline queue
+        OfflineQueue.addPendingStop(stopData);
+        setPendingStops(OfflineQueue.getPendingStops());
+        toast.warning("Uloženo lokálně - synchronizuje se při připojení");
+      }
+    } else {
+      // Save to offline queue
+      OfflineQueue.addPendingStop(stopData);
+      setPendingStops(OfflineQueue.getPendingStops());
+      toast.warning("Uloženo lokálně - synchronizuje se při připojení");
     }
   };
 
@@ -272,11 +512,14 @@ const TimerPage = () => {
 
   return (
     <div className="timer-page" data-testid="timer-page">
+      <ConnectionStatus isOnline={isOnline} pendingCount={pendingStops.length} />
+      
       <div className="timer-header">
         <button className="back-button" onClick={handleBack} data-testid="back-button">
           ← Zpět
         </button>
         <div className="employee-info">
+          {!isOnline && <WifiOff size={16} className="offline-icon" />}
           <User className="user-icon" />
           <span data-testid="employee-name">{employee.name}</span>
         </div>
@@ -288,6 +531,12 @@ const TimerPage = () => {
           <CardTitle className="timer-title">
             <Clock className="clock-icon" />
             Časomíra
+            {isRunning && !isOnline && (
+              <span className="offline-badge">
+                <CloudOff size={14} />
+                Offline
+              </span>
+            )}
           </CardTitle>
         </CardHeader>
         <CardContent>
@@ -319,7 +568,7 @@ const TimerPage = () => {
         </CardContent>
       </Card>
 
-      {/* Mode Toggle - Only visible when timer is not running */}
+      {/* Mode Toggle */}
       {!isRunning && (
         <div className="mode-toggle" data-testid="mode-toggle">
           <button
@@ -341,7 +590,7 @@ const TimerPage = () => {
         </div>
       )}
 
-      {/* Selection Controls - Only visible when timer is not running */}
+      {/* Selection Controls - Productive */}
       {!isRunning && mode === 'productive' && (
         <div className="selection-section" data-testid="selection-section">
           <Card className="selection-card">
@@ -398,7 +647,7 @@ const TimerPage = () => {
         </div>
       )}
 
-      {/* Non-Productive Selection - Only visible when timer is not running and mode is non-productive */}
+      {/* Non-Productive Selection */}
       {!isRunning && mode === 'non-productive' && (
         <div className="selection-section" data-testid="nonproductive-section">
           <Card className="selection-card nonproductive-card">
@@ -454,6 +703,14 @@ const TimerPage = () => {
           </Button>
         )}
       </div>
+
+      {/* Pending Syncs Info */}
+      {pendingStops.length > 0 && (
+        <div className="pending-syncs" data-testid="pending-syncs">
+          <CloudOff size={16} />
+          <span>{pendingStops.length} záznam(ů) čeká na synchronizaci</span>
+        </div>
+      )}
     </div>
   );
 };
