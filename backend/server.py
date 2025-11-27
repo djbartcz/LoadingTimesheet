@@ -66,14 +66,18 @@ class Project(BaseModel):
 class Task(BaseModel):
     name: str
 
+class NonProductiveTask(BaseModel):
+    name: str
+
 class TimeRecord(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     employee_id: str
     employee_name: str
-    project_id: str
-    project_name: str
+    project_id: Optional[str] = None
+    project_name: Optional[str] = None
     task: str
+    is_non_productive: bool = False
     start_time: str
     end_time: Optional[str] = None
     duration_seconds: Optional[int] = None
@@ -81,9 +85,10 @@ class TimeRecord(BaseModel):
 class StartTimerRequest(BaseModel):
     employee_id: str
     employee_name: str
-    project_id: str
-    project_name: str
+    project_id: Optional[str] = None
+    project_name: Optional[str] = None
     task: str
+    is_non_productive: bool = False
 
 class StopTimerRequest(BaseModel):
     record_id: str
@@ -157,6 +162,29 @@ async def get_tasks():
         logging.error(f"Error fetching tasks: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@api_router.get("/non-productive-tasks", response_model=List[NonProductiveTask])
+async def get_non_productive_tasks():
+    """Get all non-productive tasks from Google Sheets"""
+    if not spreadsheet:
+        raise HTTPException(status_code=500, detail="Google Sheets not configured")
+    
+    try:
+        worksheet = get_or_create_worksheet("Neproduktivní úkony", ["Název"])
+        records = worksheet.get_all_records()
+        
+        # If empty, add default non-productive tasks
+        if not records:
+            default_tasks = ["ÚKLID", "ŠROT", "MANIPULACE", "PŘEVÁŽENÍ"]
+            for task in default_tasks:
+                worksheet.append_row([task])
+            tasks = [NonProductiveTask(name=t) for t in default_tasks]
+        else:
+            tasks = [NonProductiveTask(name=str(r.get('Název', ''))) for r in records if r.get('Název')]
+        return tasks
+    except Exception as e:
+        logging.error(f"Error fetching non-productive tasks: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @api_router.post("/timer/start", response_model=TimeRecord)
 async def start_timer(request: StartTimerRequest):
     """Start a new timer - stores in MongoDB for real-time tracking"""
@@ -167,6 +195,7 @@ async def start_timer(request: StartTimerRequest):
             project_id=request.project_id,
             project_name=request.project_name,
             task=request.task,
+            is_non_productive=request.is_non_productive,
             start_time=datetime.now(timezone.utc).isoformat()
         )
         
@@ -201,25 +230,47 @@ async def stop_timer(request: StopTimerRequest):
         start_dt = datetime.fromisoformat(timer['start_time'].replace('Z', '+00:00'))
         end_dt = datetime.fromisoformat(request.end_time.replace('Z', '+00:00'))
         
-        # Save to Google Sheets
+        # Save to Google Sheets - different sheet based on type
         if spreadsheet:
-            worksheet = get_or_create_worksheet("Záznamy", [
-                "Datum", "Zaměstnanec ID", "Zaměstnanec", "Projekt ID", "Projekt", 
-                "Úkon", "Začátek", "Konec", "Doba trvání", "Doba (sekundy)"
-            ])
+            is_non_productive = timer.get('is_non_productive', False)
             
-            row = [
-                start_dt.strftime("%Y-%m-%d"),
-                timer['employee_id'],
-                timer['employee_name'],
-                timer['project_id'],
-                timer['project_name'],
-                timer['task'],
-                start_dt.strftime("%H:%M:%S"),
-                end_dt.strftime("%H:%M:%S"),
-                duration_formatted,
-                request.duration_seconds
-            ]
+            if is_non_productive:
+                # Save to non-productive records sheet
+                worksheet = get_or_create_worksheet("Neproduktivní záznamy", [
+                    "Datum", "Zaměstnanec ID", "Zaměstnanec", "Úkon", 
+                    "Začátek", "Konec", "Doba trvání", "Doba (sekundy)"
+                ])
+                
+                row = [
+                    start_dt.strftime("%Y-%m-%d"),
+                    timer['employee_id'],
+                    timer['employee_name'],
+                    timer['task'],
+                    start_dt.strftime("%H:%M:%S"),
+                    end_dt.strftime("%H:%M:%S"),
+                    duration_formatted,
+                    request.duration_seconds
+                ]
+            else:
+                # Save to productive records sheet
+                worksheet = get_or_create_worksheet("Záznamy", [
+                    "Datum", "Zaměstnanec ID", "Zaměstnanec", "Projekt ID", "Projekt", 
+                    "Úkon", "Začátek", "Konec", "Doba trvání", "Doba (sekundy)"
+                ])
+                
+                row = [
+                    start_dt.strftime("%Y-%m-%d"),
+                    timer['employee_id'],
+                    timer['employee_name'],
+                    timer.get('project_id', ''),
+                    timer.get('project_name', ''),
+                    timer['task'],
+                    start_dt.strftime("%H:%M:%S"),
+                    end_dt.strftime("%H:%M:%S"),
+                    duration_formatted,
+                    request.duration_seconds
+                ]
+            
             worksheet.append_row(row)
         
         # Remove from active timers

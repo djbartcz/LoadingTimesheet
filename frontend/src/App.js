@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
-import { Play, Square, Clock, User, Briefcase, Package } from "lucide-react";
+import { Play, Square, Clock, User, Briefcase, Package, AlertTriangle, Wrench } from "lucide-react";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -87,8 +87,11 @@ const TimerPage = () => {
   const [employee, setEmployee] = useState(null);
   const [projects, setProjects] = useState([]);
   const [tasks, setTasks] = useState([]);
+  const [nonProductiveTasks, setNonProductiveTasks] = useState([]);
   const [selectedProject, setSelectedProject] = useState(null);
   const [selectedTask, setSelectedTask] = useState(null);
+  const [selectedNonProductiveTask, setSelectedNonProductiveTask] = useState(null);
+  const [mode, setMode] = useState('productive'); // 'productive' or 'non-productive'
   const [isRunning, setIsRunning] = useState(false);
   const [elapsedTime, setElapsedTime] = useState(0);
   const [activeRecord, setActiveRecord] = useState(null);
@@ -109,16 +112,18 @@ const TimerPage = () => {
     }
   }, [employeeId, navigate]);
 
-  // Fetch projects and tasks
+  // Fetch projects, tasks and non-productive tasks
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [projectsRes, tasksRes] = await Promise.all([
+        const [projectsRes, tasksRes, nonProductiveRes] = await Promise.all([
           axios.get(`${API}/projects`),
-          axios.get(`${API}/tasks`)
+          axios.get(`${API}/tasks`),
+          axios.get(`${API}/non-productive-tasks`)
         ]);
         setProjects(projectsRes.data);
         setTasks(tasksRes.data);
+        setNonProductiveTasks(nonProductiveRes.data);
       } catch (e) {
         console.error("Error fetching data:", e);
         toast.error("Nepodařilo se načíst data");
@@ -138,8 +143,15 @@ const TimerPage = () => {
         if (response.data) {
           setActiveRecord(response.data);
           setIsRunning(true);
-          setSelectedProject(projects.find(p => p.id === response.data.project_id) || null);
-          setSelectedTask(response.data.task);
+          
+          if (response.data.is_non_productive) {
+            setMode('non-productive');
+            setSelectedNonProductiveTask(response.data.task);
+          } else {
+            setMode('productive');
+            setSelectedProject(projects.find(p => p.id === response.data.project_id) || null);
+            setSelectedTask(response.data.task);
+          }
           
           // Calculate elapsed time
           const startTime = new Date(response.data.start_time).getTime();
@@ -150,10 +162,10 @@ const TimerPage = () => {
         console.error("Error checking active timer:", e);
       }
     };
-    if (projects.length > 0) {
+    if (projects.length > 0 || nonProductiveTasks.length > 0) {
       checkActiveTimer();
     }
-  }, [employeeId, projects]);
+  }, [employeeId, projects, nonProductiveTasks]);
 
   // Timer effect
   useEffect(() => {
@@ -174,19 +186,31 @@ const TimerPage = () => {
   }, []);
 
   const handleStart = async () => {
-    if (!selectedProject || !selectedTask) {
+    if (mode === 'productive' && (!selectedProject || !selectedTask)) {
       toast.error("Vyberte projekt a úkon");
+      return;
+    }
+    if (mode === 'non-productive' && !selectedNonProductiveTask) {
+      toast.error("Vyberte neproduktivní úkon");
       return;
     }
 
     try {
-      const response = await axios.post(`${API}/timer/start`, {
+      const requestData = {
         employee_id: employee.id,
         employee_name: employee.name,
-        project_id: selectedProject.id,
-        project_name: selectedProject.name,
-        task: selectedTask
-      });
+        is_non_productive: mode === 'non-productive'
+      };
+
+      if (mode === 'productive') {
+        requestData.project_id = selectedProject.id;
+        requestData.project_name = selectedProject.name;
+        requestData.task = selectedTask;
+      } else {
+        requestData.task = selectedNonProductiveTask;
+      }
+
+      const response = await axios.post(`${API}/timer/start`, requestData);
       
       setActiveRecord(response.data);
       setIsRunning(true);
@@ -213,6 +237,7 @@ const TimerPage = () => {
       setElapsedTime(0);
       setSelectedProject(null);
       setSelectedTask(null);
+      setSelectedNonProductiveTask(null);
       toast.success("Čas uložen do Google Sheets");
     } catch (e) {
       console.error("Error stopping timer:", e);
@@ -222,11 +247,18 @@ const TimerPage = () => {
 
   const handleBack = () => {
     if (isRunning) {
-      toast.error("Nejprve zastavte časomíru");
-      return;
+      const confirm = window.confirm("Časomíra stále běží! Opravdu chcete odejít? Časomíra bude pokračovat.");
+      if (!confirm) return;
     }
-    localStorage.removeItem('selectedEmployee');
     navigate('/');
+  };
+
+  const handleModeChange = (newMode) => {
+    if (isRunning) return;
+    setMode(newMode);
+    setSelectedProject(null);
+    setSelectedTask(null);
+    setSelectedNonProductiveTask(null);
   };
 
   if (loading || !employee) {
@@ -251,7 +283,7 @@ const TimerPage = () => {
       </div>
 
       {/* Active Timer Display */}
-      <Card className={`timer-card ${isRunning ? 'running' : ''}`} data-testid="timer-card">
+      <Card className={`timer-card ${isRunning ? (activeRecord?.is_non_productive ? 'running-nonproductive' : 'running') : ''}`} data-testid="timer-card">
         <CardHeader>
           <CardTitle className="timer-title">
             <Clock className="clock-icon" />
@@ -263,22 +295,54 @@ const TimerPage = () => {
             {formatTime(elapsedTime)}
           </div>
           {isRunning && activeRecord && (
-            <div className="active-info" data-testid="active-timer-info">
-              <div className="info-row">
-                <Briefcase size={18} />
-                <span>{activeRecord.project_name}</span>
-              </div>
-              <div className="info-row">
-                <Package size={18} />
-                <span>{activeRecord.task}</span>
-              </div>
+            <div className={`active-info ${activeRecord.is_non_productive ? 'nonproductive' : ''}`} data-testid="active-timer-info">
+              {activeRecord.is_non_productive ? (
+                <div className="info-row">
+                  <Wrench size={18} />
+                  <span>{activeRecord.task}</span>
+                  <span className="badge nonproductive-badge">Neproduktivní</span>
+                </div>
+              ) : (
+                <>
+                  <div className="info-row">
+                    <Briefcase size={18} />
+                    <span>{activeRecord.project_name}</span>
+                  </div>
+                  <div className="info-row">
+                    <Package size={18} />
+                    <span>{activeRecord.task}</span>
+                  </div>
+                </>
+              )}
             </div>
           )}
         </CardContent>
       </Card>
 
-      {/* Selection Controls - Only visible when timer is not running */}
+      {/* Mode Toggle - Only visible when timer is not running */}
       {!isRunning && (
+        <div className="mode-toggle" data-testid="mode-toggle">
+          <button
+            className={`mode-button ${mode === 'productive' ? 'active' : ''}`}
+            onClick={() => handleModeChange('productive')}
+            data-testid="mode-productive"
+          >
+            <Briefcase size={20} />
+            Produktivní
+          </button>
+          <button
+            className={`mode-button nonproductive ${mode === 'non-productive' ? 'active' : ''}`}
+            onClick={() => handleModeChange('non-productive')}
+            data-testid="mode-nonproductive"
+          >
+            <Wrench size={20} />
+            Neproduktivní
+          </button>
+        </div>
+      )}
+
+      {/* Selection Controls - Only visible when timer is not running */}
+      {!isRunning && mode === 'productive' && (
         <div className="selection-section" data-testid="selection-section">
           <Card className="selection-card">
             <CardHeader>
@@ -334,13 +398,46 @@ const TimerPage = () => {
         </div>
       )}
 
+      {/* Non-Productive Selection - Only visible when timer is not running and mode is non-productive */}
+      {!isRunning && mode === 'non-productive' && (
+        <div className="selection-section" data-testid="nonproductive-section">
+          <Card className="selection-card nonproductive-card">
+            <CardHeader>
+              <CardTitle>
+                <Wrench className="section-icon" />
+                Neproduktivní úkon
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="task-grid">
+                {nonProductiveTasks.map((task) => (
+                  <button
+                    key={task.name}
+                    className={`task-button nonproductive ${selectedNonProductiveTask === task.name ? 'selected' : ''}`}
+                    onClick={() => setSelectedNonProductiveTask(task.name)}
+                    data-testid={`nonproductive-btn-${task.name}`}
+                  >
+                    {task.name}
+                  </button>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+          
+          <div className="nonproductive-hint">
+            <AlertTriangle size={16} />
+            <span>Neproduktivní úkony nejsou vázány na projekt</span>
+          </div>
+        </div>
+      )}
+
       {/* Action Buttons */}
       <div className="action-buttons">
         {!isRunning ? (
           <Button
-            className="start-button"
+            className={`start-button ${mode === 'non-productive' ? 'nonproductive' : ''}`}
             onClick={handleStart}
-            disabled={!selectedProject || !selectedTask}
+            disabled={mode === 'productive' ? (!selectedProject || !selectedTask) : !selectedNonProductiveTask}
             data-testid="start-button"
           >
             <Play size={24} />

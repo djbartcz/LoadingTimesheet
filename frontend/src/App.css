@@ -13,6 +13,8 @@
   --accent-secondary: #0ea5e9;
   --accent-success: #10b981;
   --accent-danger: #ef4444;
+  --accent-warning: #f59e0b;
+  --accent-orange: #ea580c;
   --border-color: #e2e8f0;
   --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
   --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
@@ -226,6 +228,11 @@ body {
   background: linear-gradient(to bottom, #f0fdf4, var(--bg-secondary));
 }
 
+.timer-card.running-nonproductive {
+  border-color: var(--accent-orange);
+  background: linear-gradient(to bottom, #fff7ed, var(--bg-secondary));
+}
+
 .timer-title {
   display: flex;
   align-items: center;
@@ -242,6 +249,11 @@ body {
 
 .timer-card.running .clock-icon {
   color: var(--accent-success);
+  animation: pulse 2s ease-in-out infinite;
+}
+
+.timer-card.running-nonproductive .clock-icon {
+  color: var(--accent-orange);
   animation: pulse 2s ease-in-out infinite;
 }
 
@@ -270,6 +282,10 @@ body {
   margin-top: 8px;
 }
 
+.active-info.nonproductive {
+  background: rgba(234, 88, 12, 0.1);
+}
+
 .info-row {
   display: flex;
   align-items: center;
@@ -280,6 +296,64 @@ body {
 
 .info-row svg {
   color: var(--accent-success);
+}
+
+.active-info.nonproductive .info-row svg {
+  color: var(--accent-orange);
+}
+
+.badge {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-weight: 600;
+  margin-left: auto;
+}
+
+.nonproductive-badge {
+  background: rgba(234, 88, 12, 0.15);
+  color: var(--accent-orange);
+}
+
+/* Mode Toggle */
+.mode-toggle {
+  display: flex;
+  gap: 8px;
+  background: var(--bg-secondary);
+  padding: 6px;
+  border-radius: 12px;
+  border: 1px solid var(--border-color);
+}
+
+.mode-button {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px 16px;
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.mode-button:hover {
+  background: var(--bg-primary);
+}
+
+.mode-button.active {
+  background: var(--accent-primary);
+  color: white;
+}
+
+.mode-button.nonproductive.active {
+  background: var(--accent-orange);
 }
 
 /* Selection Section */
@@ -295,10 +369,18 @@ body {
   border-radius: var(--radius);
 }
 
+.nonproductive-card {
+  border-color: rgba(234, 88, 12, 0.3);
+}
+
 .selection-card .section-icon {
   width: 20px;
   height: 20px;
   color: var(--accent-primary);
+}
+
+.nonproductive-card .section-icon {
+  color: var(--accent-orange);
 }
 
 .select-trigger {
@@ -337,6 +419,28 @@ body {
   color: white;
 }
 
+.task-button.nonproductive:hover {
+  border-color: var(--accent-orange);
+  color: var(--accent-orange);
+}
+
+.task-button.nonproductive.selected {
+  background: var(--accent-orange);
+  border-color: var(--accent-orange);
+  color: white;
+}
+
+.nonproductive-hint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  background: rgba(234, 88, 12, 0.08);
+  border-radius: 10px;
+  font-size: 13px;
+  color: var(--accent-orange);
+}
+
 /* Action Buttons */
 .action-buttons {
   margin-top: auto;
@@ -360,6 +464,14 @@ body {
 
 .start-button:hover:not(:disabled) {
   background: var(--accent-secondary);
+}
+
+.start-button.nonproductive {
+  background: var(--accent-orange);
+}
+
+.start-button.nonproductive:hover:not(:disabled) {
+  background: #c2410c;
 }
 
 .start-button:disabled {
@@ -402,6 +514,11 @@ body {
   
   .task-grid {
     grid-template-columns: 1fr;
+  }
+  
+  .mode-button {
+    font-size: 13px;
+    padding: 10px 12px;
   }
 }
 
