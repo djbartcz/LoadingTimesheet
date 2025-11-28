@@ -597,7 +597,30 @@ const TimerPage = () => {
 const AdminDashboard = () => {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
   const navigate = useNavigate();
+
+  const ADMIN_PASSWORD = 'VedouciNakladky2025.';
+
+  const handleLogin = (e) => {
+    e.preventDefault();
+    if (password === ADMIN_PASSWORD) {
+      setIsAuthenticated(true);
+      sessionStorage.setItem('adminAuth', 'true');
+      setError('');
+    } else {
+      setError('Nesprávné heslo');
+    }
+  };
+
+  useEffect(() => {
+    const auth = sessionStorage.getItem('adminAuth');
+    if (auth === 'true') {
+      setIsAuthenticated(true);
+    }
+  }, []);
 
   const fetchData = async () => {
     try {
@@ -608,10 +631,37 @@ const AdminDashboard = () => {
   };
 
   useEffect(() => {
-    fetchData();
-    const interval = setInterval(fetchData, 30000);
-    return () => clearInterval(interval);
-  }, []);
+    if (isAuthenticated) {
+      fetchData();
+      const interval = setInterval(fetchData, 30000);
+      return () => clearInterval(interval);
+    }
+  }, [isAuthenticated]);
+
+  if (!isAuthenticated) {
+    return (
+      <div className="admin-login">
+        <div className="login-card">
+          <BarChart3 size={40} className="login-icon" />
+          <h2>Admin přehled</h2>
+          <p>Zadejte heslo pro přístup</p>
+          <form onSubmit={handleLogin}>
+            <input
+              type="password"
+              placeholder="Heslo"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="login-input"
+              autoFocus
+            />
+            {error && <div className="login-error">{error}</div>}
+            <button type="submit" className="login-button">Přihlásit</button>
+          </form>
+          <button className="back-link" onClick={() => navigate('/')}>← Zpět na výběr</button>
+        </div>
+      </div>
+    );
+  }
 
   if (loading) return <div className="loading-container"><div className="spinner"></div></div>;
 
