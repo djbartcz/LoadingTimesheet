@@ -555,9 +555,9 @@ const TimerPage = () => {
       {/* Action Buttons */}
       <div className="action-buttons">
         {!isRunning ? (
-          <Button className={`start-button ${mode === 'non-productive' ? 'nonproductive' : mode === 'break' ? 'break' : ''}`}
+          <Button className={`start-button ${mode === 'non-productive' ? 'nonproductive' : ''}`}
             onClick={() => handleStart(false)}
-            disabled={mode === 'productive' ? (!selectedProject || !selectedTask) : mode === 'non-productive' ? !selectedNonProductiveTask : false}>
+            disabled={mode === 'productive' ? (!selectedProject || !selectedTask) : !selectedNonProductiveTask}>
             <Play size={24} />START
           </Button>
         ) : (
