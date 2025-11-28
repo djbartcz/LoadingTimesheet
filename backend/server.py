@@ -298,6 +298,16 @@ async def get_active_timer(employee_id: str):
         logging.error(f"Error getting active timer: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@api_router.get("/timers/active")
+async def get_all_active_timers():
+    """Get all active timers - shows who is currently working"""
+    try:
+        timers = await db.active_timers.find({}, {"_id": 0}).to_list(1000)
+        return timers
+    except Exception as e:
+        logging.error(f"Error getting active timers: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 # Include the router in the main app
 app.include_router(api_router)
 
