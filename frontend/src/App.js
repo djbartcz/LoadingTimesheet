@@ -256,10 +256,11 @@ const EmployeeSelection = () => {
         ) : (
           employees.map((employee) => {
             const activeTimer = getActiveTimer(employee.id);
+            const isNonProductive = activeTimer?.is_non_productive;
             return (
               <button
                 key={employee.id}
-                className={`employee-list-item ${activeTimer ? 'working' : ''}`}
+                className={`employee-list-item ${activeTimer ? (isNonProductive ? 'working-nonproductive' : 'working') : ''}`}
                 onClick={() => handleSelectEmployee(employee)}
                 data-testid={`employee-btn-${employee.id}`}
               >
@@ -267,16 +268,16 @@ const EmployeeSelection = () => {
                 <div className="employee-info-content">
                   <span className="employee-name">{employee.name}</span>
                   {activeTimer && (
-                    <div className="employee-status">
+                    <div className={`employee-status ${isNonProductive ? 'nonproductive' : ''}`}>
                       <Timer size={14} className="status-icon" />
                       <span>{activeTimer.project_name || activeTimer.task}</span>
                     </div>
                   )}
                 </div>
                 {activeTimer ? (
-                  <div className="working-badge">
-                    <span className="pulse-dot"></span>
-                    Pracuje
+                  <div className={`working-badge ${isNonProductive ? 'nonproductive' : ''}`}>
+                    <span className={`pulse-dot ${isNonProductive ? 'nonproductive' : ''}`}></span>
+                    {isNonProductive ? 'Neprod.' : 'Pracuje'}
                   </div>
                 ) : (
                   <ChevronRight className="chevron" />
