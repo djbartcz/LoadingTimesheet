@@ -188,6 +188,15 @@ body {
   color: var(--accent-success);
 }
 
+.employee-list-item.working-nonproductive {
+  border-color: var(--accent-orange);
+  background: linear-gradient(to right, #fff7ed, var(--bg-secondary));
+}
+
+.employee-list-item.working-nonproductive .employee-icon {
+  color: var(--accent-orange);
+}
+
 .employee-info-content {
   flex: 1;
   display: flex;
