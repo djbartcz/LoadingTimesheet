@@ -254,18 +254,36 @@ const EmployeeSelection = () => {
             <span>Přidejte zaměstnance do Google Sheets</span>
           </div>
         ) : (
-          employees.map((employee) => (
-            <button
-              key={employee.id}
-              className="employee-list-item"
-              onClick={() => handleSelectEmployee(employee)}
-              data-testid={`employee-btn-${employee.id}`}
-            >
-              <User className="employee-icon" />
-              <span className="employee-name">{employee.name}</span>
-              <ChevronRight className="chevron" />
-            </button>
-          ))
+          employees.map((employee) => {
+            const activeTimer = getActiveTimer(employee.id);
+            return (
+              <button
+                key={employee.id}
+                className={`employee-list-item ${activeTimer ? 'working' : ''}`}
+                onClick={() => handleSelectEmployee(employee)}
+                data-testid={`employee-btn-${employee.id}`}
+              >
+                <User className="employee-icon" />
+                <div className="employee-info-content">
+                  <span className="employee-name">{employee.name}</span>
+                  {activeTimer && (
+                    <div className="employee-status">
+                      <Timer size={14} className="status-icon" />
+                      <span>{activeTimer.project_name || activeTimer.task}</span>
+                    </div>
+                  )}
+                </div>
+                {activeTimer ? (
+                  <div className="working-badge">
+                    <span className="pulse-dot"></span>
+                    Pracuje
+                  </div>
+                ) : (
+                  <ChevronRight className="chevron" />
+                )}
+              </button>
+            );
+          })
         )}
       </div>
     </div>
