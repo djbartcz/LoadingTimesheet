@@ -179,12 +179,72 @@ body {
   flex-shrink: 0;
 }
 
+.employee-list-item.working {
+  border-color: var(--accent-success);
+  background: linear-gradient(to right, #f0fdf4, var(--bg-secondary));
+}
+
+.employee-list-item.working .employee-icon {
+  color: var(--accent-success);
+}
+
+.employee-info-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
 .employee-list-item .employee-name {
   font-family: 'Space Grotesk', sans-serif;
   font-size: 18px;
   font-weight: 600;
   color: var(--text-primary);
-  flex: 1;
+}
+
+.employee-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--accent-success);
+  font-weight: 500;
+}
+
+.employee-status .status-icon {
+  animation: pulse 2s ease-in-out infinite;
+}
+
+.working-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(16, 185, 129, 0.15);
+  color: var(--accent-success);
+  padding: 6px 12px;
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.pulse-dot {
+  width: 8px;
+  height: 8px;
+  background: var(--accent-success);
+  border-radius: 50%;
+  animation: pulseDot 2s ease-in-out infinite;
+}
+
+@keyframes pulseDot {
+  0%, 100% { 
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% { 
+    opacity: 0.5;
+    transform: scale(0.8);
+  }
 }
 
 .employee-list-item .chevron {
