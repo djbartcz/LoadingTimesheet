@@ -343,14 +343,6 @@ const TimerPage = () => {
         is_non_productive: lastTask.is_non_productive || false,
         is_break: false
       };
-    } else if (mode === 'break') {
-      taskData = {
-        employee_id: employee.id,
-        employee_name: employee.name,
-        task: 'PŘESTÁVKA',
-        is_non_productive: false,
-        is_break: true
-      };
     } else if (mode === 'productive') {
       if (!selectedProject || !selectedTask) { toast.error("Vyberte projekt a úkon"); return; }
       taskData = {
