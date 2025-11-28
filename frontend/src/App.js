@@ -1,17 +1,21 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import "@/App.css";
-import { BrowserRouter, Routes, Route, useNavigate, useParams } from "react-router-dom";
+import { BrowserRouter, Routes, Route, useNavigate, useParams, Link } from "react-router-dom";
 import axios from "axios";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
-import { Play, Square, Clock, User, Briefcase, Package, AlertTriangle, Wrench, WifiOff, CloudOff, RefreshCw, X, ChevronRight, Search, Timer } from "lucide-react";
+import { 
+  Play, Square, Clock, User, Briefcase, Package, AlertTriangle, Wrench, 
+  WifiOff, CloudOff, RefreshCw, X, ChevronRight, Search, Timer, Coffee,
+  BarChart3, Users, History, Repeat, Bell, TrendingUp, Pause
+} from "lucide-react";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
 
-// Offline Storage Keys
+// Storage Keys
 const STORAGE_KEYS = {
   ACTIVE_TIMER: 'timesheet_active_timer',
   PENDING_STOPS: 'timesheet_pending_stops',
@@ -22,133 +26,83 @@ const STORAGE_KEYS = {
 const OfflineQueue = {
   getPendingStops: () => {
     try {
-      const data = localStorage.getItem(STORAGE_KEYS.PENDING_STOPS);
-      return data ? JSON.parse(data) : [];
-    } catch {
-      return [];
-    }
+      return JSON.parse(localStorage.getItem(STORAGE_KEYS.PENDING_STOPS) || '[]');
+    } catch { return []; }
   },
-  
   addPendingStop: (stopData) => {
     const pending = OfflineQueue.getPendingStops();
     pending.push(stopData);
     localStorage.setItem(STORAGE_KEYS.PENDING_STOPS, JSON.stringify(pending));
   },
-  
   removePendingStop: (recordId) => {
-    const pending = OfflineQueue.getPendingStops();
-    const filtered = pending.filter(p => p.record_id !== recordId);
-    localStorage.setItem(STORAGE_KEYS.PENDING_STOPS, JSON.stringify(filtered));
-  },
-  
-  clearPendingStops: () => {
-    localStorage.removeItem(STORAGE_KEYS.PENDING_STOPS);
+    const pending = OfflineQueue.getPendingStops().filter(p => p.record_id !== recordId);
+    localStorage.setItem(STORAGE_KEYS.PENDING_STOPS, JSON.stringify(pending));
   }
 };
 
-// Local Timer Storage
 const TimerStorage = {
-  save: (timerData) => {
-    localStorage.setItem(STORAGE_KEYS.ACTIVE_TIMER, JSON.stringify(timerData));
-  },
-  
-  get: () => {
-    try {
-      const data = localStorage.getItem(STORAGE_KEYS.ACTIVE_TIMER);
-      return data ? JSON.parse(data) : null;
-    } catch {
-      return null;
-    }
-  },
-  
-  clear: () => {
-    localStorage.removeItem(STORAGE_KEYS.ACTIVE_TIMER);
-  }
+  save: (data) => localStorage.setItem(STORAGE_KEYS.ACTIVE_TIMER, JSON.stringify(data)),
+  get: () => { try { return JSON.parse(localStorage.getItem(STORAGE_KEYS.ACTIVE_TIMER)); } catch { return null; } },
+  clear: () => localStorage.removeItem(STORAGE_KEYS.ACTIVE_TIMER)
 };
 
-// Online Status Hook
 const useOnlineStatus = () => {
   const [isOnline, setIsOnline] = useState(navigator.onLine);
-  
   useEffect(() => {
-    const handleOnline = () => setIsOnline(true);
-    const handleOffline = () => setIsOnline(false);
-    
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('offline', handleOffline);
-    
-    return () => {
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
-    };
+    const on = () => setIsOnline(true);
+    const off = () => setIsOnline(false);
+    window.addEventListener('online', on);
+    window.addEventListener('offline', off);
+    return () => { window.removeEventListener('online', on); window.removeEventListener('offline', off); };
   }, []);
-  
   return isOnline;
 };
 
-// Connection Status Component
+const formatDuration = (seconds) => {
+  if (!seconds) return '0min';
+  const hrs = Math.floor(seconds / 3600);
+  const mins = Math.floor((seconds % 3600) / 60);
+  if (hrs > 0) return `${hrs}h ${mins}min`;
+  return `${mins}min`;
+};
+
+const formatTime = (seconds) => {
+  const hrs = Math.floor(seconds / 3600);
+  const mins = Math.floor((seconds % 3600) / 60);
+  const secs = seconds % 60;
+  return `${hrs.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+};
+
 const ConnectionStatus = ({ isOnline, pendingCount }) => {
   if (isOnline && pendingCount === 0) return null;
-  
   return (
-    <div className={`connection-status ${isOnline ? 'pending' : 'offline'}`} data-testid="connection-status">
-      {!isOnline ? (
-        <>
-          <WifiOff size={18} />
-          <span>Offline režim</span>
-        </>
-      ) : pendingCount > 0 ? (
-        <>
-          <RefreshCw size={18} className="spinning" />
-          <span>Synchronizuji ({pendingCount})...</span>
-        </>
-      ) : null}
+    <div className={`connection-status ${isOnline ? 'pending' : 'offline'}`}>
+      {!isOnline ? <><WifiOff size={18} /><span>Offline režim</span></> 
+        : <><RefreshCw size={18} className="spinning" /><span>Synchronizuji ({pendingCount})...</span></>}
     </div>
   );
 };
 
-// Fullscreen Project Picker Modal
 const ProjectPickerModal = ({ isOpen, onClose, projects, onSelect, selectedProject }) => {
   const [searchTerm, setSearchTerm] = useState('');
-  
   if (!isOpen) return null;
-  
-  const filteredProjects = projects.filter(p => 
-    p.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    p.id.toLowerCase().includes(searchTerm.toLowerCase())
+  const filtered = projects.filter(p => 
+    p.name.toLowerCase().includes(searchTerm.toLowerCase()) || p.id.toLowerCase().includes(searchTerm.toLowerCase())
   );
-  
   return (
-    <div className="fullscreen-modal" data-testid="project-modal">
+    <div className="fullscreen-modal">
       <div className="modal-header">
         <h2>Vyberte projekt</h2>
-        <button className="modal-close" onClick={onClose} data-testid="modal-close">
-          <X size={28} />
-        </button>
+        <button className="modal-close" onClick={onClose}><X size={28} /></button>
       </div>
-      
       <div className="modal-search">
         <Search size={20} />
-        <input
-          type="text"
-          placeholder="Hledat projekt..."
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-          data-testid="project-search"
-        />
+        <input type="text" placeholder="Hledat projekt..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
       </div>
-      
       <div className="modal-list">
-        {filteredProjects.map((project) => (
-          <button
-            key={project.id}
-            className={`modal-list-item ${selectedProject?.id === project.id ? 'selected' : ''}`}
-            onClick={() => {
-              onSelect(project);
-              onClose();
-            }}
-            data-testid={`project-item-${project.id}`}
-          >
+        {filtered.map((project) => (
+          <button key={project.id} className={`modal-list-item ${selectedProject?.id === project.id ? 'selected' : ''}`}
+            onClick={() => { onSelect(project); onClose(); }}>
             <div className="item-content">
               <span className="item-id">{project.id}</span>
               <span className="item-name">{project.name}</span>
@@ -156,11 +110,6 @@ const ProjectPickerModal = ({ isOpen, onClose, projects, onSelect, selectedProje
             <ChevronRight size={24} />
           </button>
         ))}
-        {filteredProjects.length === 0 && (
-          <div className="modal-empty">
-            <p>Žádné projekty nenalezeny</p>
-          </div>
-        )}
       </div>
     </div>
   );
@@ -171,121 +120,82 @@ const EmployeeSelection = () => {
   const [employees, setEmployees] = useState([]);
   const [activeTimers, setActiveTimers] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
   const navigate = useNavigate();
   const isOnline = useOnlineStatus();
 
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [employeesRes, timersRes] = await Promise.all([
+        const [empRes, timersRes] = await Promise.all([
           axios.get(`${API}/employees`, { timeout: 10000 }),
           axios.get(`${API}/timers/active`, { timeout: 10000 }).catch(() => ({ data: [] }))
         ]);
-        
-        // Sort alphabetically by name
-        const sorted = employeesRes.data.sort((a, b) => a.name.localeCompare(b.name, 'cs'));
+        const sorted = empRes.data.sort((a, b) => a.name.localeCompare(b.name, 'cs'));
         setEmployees(sorted);
         setActiveTimers(timersRes.data || []);
         localStorage.setItem('cached_employees', JSON.stringify(sorted));
-        setError(null);
       } catch (e) {
-        console.error("Error fetching employees:", e);
         const cached = localStorage.getItem('cached_employees');
-        if (cached) {
-          setEmployees(JSON.parse(cached));
-          toast.info("Načteno z cache (offline)");
-        } else {
-          setError("Nepodařilo se načíst zaměstnance");
-          toast.error("Nepodařilo se načíst zaměstnance");
-        }
-      } finally {
-        setLoading(false);
-      }
+        if (cached) setEmployees(JSON.parse(cached));
+      } finally { setLoading(false); }
     };
     fetchData();
-    
-    // Refresh active timers every 30 seconds
     const interval = setInterval(async () => {
       try {
         const res = await axios.get(`${API}/timers/active`, { timeout: 10000 });
         setActiveTimers(res.data || []);
-      } catch (e) {
-        console.error("Error refreshing active timers:", e);
-      }
+      } catch (e) {}
     }, 30000);
-    
     return () => clearInterval(interval);
   }, []);
-  
-  const getActiveTimer = (employeeId) => {
-    return activeTimers.find(t => t.employee_id === employeeId);
-  };
 
-  const handleSelectEmployee = (employee) => {
-    localStorage.setItem(STORAGE_KEYS.SELECTED_EMPLOYEE, JSON.stringify(employee));
-    navigate(`/employee/${employee.id}`);
-  };
+  const getActiveTimer = (employeeId) => activeTimers.find(t => t.employee_id === employeeId);
 
-  if (loading) {
-    return (
-      <div className="loading-container" data-testid="loading-spinner">
-        <div className="spinner"></div>
-        <p>Načítání...</p>
-      </div>
-    );
-  }
+  if (loading) return <div className="loading-container"><div className="spinner"></div><p>Načítání...</p></div>;
 
   return (
-    <div className="employee-selection" data-testid="employee-selection-page">
+    <div className="employee-selection">
       <ConnectionStatus isOnline={isOnline} pendingCount={0} />
-      
       <div className="header">
         <Clock className="header-icon" />
         <h1>Evidence pracovní doby</h1>
         <p>Vyberte své jméno</p>
       </div>
       
+      <Link to="/admin" className="admin-link">
+        <BarChart3 size={20} />
+        <span>Admin přehled</span>
+        <ChevronRight size={20} />
+      </Link>
+      
       <div className="employees-list">
-        {employees.length === 0 ? (
-          <div className="empty-state" data-testid="no-employees">
-            <User size={48} />
-            <p>{error || "Žádní zaměstnanci"}</p>
-            <span>Přidejte zaměstnance do Google Sheets</span>
-          </div>
-        ) : (
-          employees.map((employee) => {
-            const activeTimer = getActiveTimer(employee.id);
-            const isNonProductive = activeTimer?.is_non_productive;
-            return (
-              <button
-                key={employee.id}
-                className={`employee-list-item ${activeTimer ? (isNonProductive ? 'working-nonproductive' : 'working') : ''}`}
-                onClick={() => handleSelectEmployee(employee)}
-                data-testid={`employee-btn-${employee.id}`}
-              >
-                <User className="employee-icon" />
-                <div className="employee-info-content">
-                  <span className="employee-name">{employee.name}</span>
-                  {activeTimer && (
-                    <div className={`employee-status ${isNonProductive ? 'nonproductive' : ''}`}>
-                      <Timer size={14} className="status-icon" />
-                      <span>{activeTimer.project_name || activeTimer.task}</span>
-                    </div>
-                  )}
-                </div>
-                {activeTimer ? (
-                  <div className={`working-badge ${isNonProductive ? 'nonproductive' : ''}`}>
-                    <span className={`pulse-dot ${isNonProductive ? 'nonproductive' : ''}`}></span>
-                    {isNonProductive ? 'Neprod.' : 'Pracuje'}
+        {employees.map((employee) => {
+          const activeTimer = getActiveTimer(employee.id);
+          const isNonProductive = activeTimer?.is_non_productive;
+          const isBreak = activeTimer?.is_break;
+          return (
+            <button key={employee.id}
+              className={`employee-list-item ${activeTimer ? (isBreak ? 'on-break' : isNonProductive ? 'working-nonproductive' : 'working') : ''}`}
+              onClick={() => { localStorage.setItem(STORAGE_KEYS.SELECTED_EMPLOYEE, JSON.stringify(employee)); navigate(`/employee/${employee.id}`); }}>
+              <User className="employee-icon" />
+              <div className="employee-info-content">
+                <span className="employee-name">{employee.name}</span>
+                {activeTimer && (
+                  <div className={`employee-status ${isBreak ? 'break' : isNonProductive ? 'nonproductive' : ''}`}>
+                    {isBreak ? <Coffee size={14} /> : <Timer size={14} />}
+                    <span>{activeTimer.project_name || activeTimer.task}</span>
                   </div>
-                ) : (
-                  <ChevronRight className="chevron" />
                 )}
-              </button>
-            );
-          })
-        )}
+              </div>
+              {activeTimer ? (
+                <div className={`working-badge ${isBreak ? 'break' : isNonProductive ? 'nonproductive' : ''}`}>
+                  <span className={`pulse-dot ${isBreak ? 'break' : isNonProductive ? 'nonproductive' : ''}`}></span>
+                  {isBreak ? 'Přestávka' : isNonProductive ? 'Neprod.' : 'Pracuje'}
+                </div>
+              ) : <ChevronRight className="chevron" />}
+            </button>
+          );
+        })}
       </div>
     </div>
   );
@@ -303,205 +213,167 @@ const TimerPage = () => {
   const [selectedProject, setSelectedProject] = useState(null);
   const [selectedTask, setSelectedTask] = useState(null);
   const [selectedNonProductiveTask, setSelectedNonProductiveTask] = useState(null);
-  const [mode, setMode] = useState('productive');
+  const [mode, setMode] = useState('productive'); // productive, non-productive, break
   const [isRunning, setIsRunning] = useState(false);
   const [elapsedTime, setElapsedTime] = useState(0);
   const [activeRecord, setActiveRecord] = useState(null);
   const [loading, setLoading] = useState(true);
   const [pendingStops, setPendingStops] = useState([]);
-  const [syncing, setSyncing] = useState(false);
   const [showProjectModal, setShowProjectModal] = useState(false);
+  const [lastTask, setLastTask] = useState(null);
+  const [summary, setSummary] = useState(null);
+  const [showHistory, setShowHistory] = useState(false);
   const syncingRef = useRef(false);
 
-  // Load employee from localStorage
   useEffect(() => {
     const stored = localStorage.getItem(STORAGE_KEYS.SELECTED_EMPLOYEE);
     if (stored) {
       const emp = JSON.parse(stored);
-      if (emp.id === employeeId) {
-        setEmployee(emp);
-      } else {
-        navigate('/');
-      }
-    } else {
-      navigate('/');
-    }
+      if (emp.id === employeeId) setEmployee(emp);
+      else navigate('/');
+    } else navigate('/');
   }, [employeeId, navigate]);
 
-  // Load pending stops count
-  useEffect(() => {
-    setPendingStops(OfflineQueue.getPendingStops());
-  }, []);
+  useEffect(() => { setPendingStops(OfflineQueue.getPendingStops()); }, []);
 
-  // Sync pending stops when online
   useEffect(() => {
-    const syncPendingStops = async () => {
+    const sync = async () => {
       if (!isOnline || syncingRef.current) return;
-      
       const pending = OfflineQueue.getPendingStops();
       if (pending.length === 0) return;
-      
       syncingRef.current = true;
-      setSyncing(true);
-      
       for (const stopData of pending) {
         try {
           await axios.post(`${API}/timer/stop`, stopData, { timeout: 15000 });
           OfflineQueue.removePendingStop(stopData.record_id);
-          toast.success(`Synchronizováno: ${stopData.task || 'záznam'}`);
-        } catch (e) {
-          console.error("Sync failed:", e);
-        }
+          toast.success(`Synchronizováno`);
+        } catch (e) {}
       }
-      
       setPendingStops(OfflineQueue.getPendingStops());
       syncingRef.current = false;
-      setSyncing(false);
     };
-    
-    syncPendingStops();
+    sync();
   }, [isOnline]);
 
-  // Fetch projects, tasks and non-productive tasks
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [projectsRes, tasksRes, nonProductiveRes] = await Promise.all([
+        const [projectsRes, tasksRes, nonProdRes, lastTaskRes, summaryRes] = await Promise.all([
           axios.get(`${API}/projects`, { timeout: 10000 }),
           axios.get(`${API}/tasks`, { timeout: 10000 }),
-          axios.get(`${API}/non-productive-tasks`, { timeout: 10000 })
+          axios.get(`${API}/non-productive-tasks`, { timeout: 10000 }),
+          axios.get(`${API}/employee/${employeeId}/last-task`, { timeout: 10000 }).catch(() => ({ data: null })),
+          axios.get(`${API}/employee/${employeeId}/summary`, { timeout: 10000 }).catch(() => ({ data: null }))
         ]);
-        
-        // Sort projects alphabetically
-        const sortedProjects = projectsRes.data.sort((a, b) => a.name.localeCompare(b.name, 'cs'));
-        setProjects(sortedProjects);
+        setProjects(projectsRes.data.sort((a, b) => a.name.localeCompare(b.name, 'cs')));
         setTasks(tasksRes.data);
-        setNonProductiveTasks(nonProductiveRes.data);
-        
-        localStorage.setItem('cached_projects', JSON.stringify(sortedProjects));
+        setNonProductiveTasks(nonProdRes.data);
+        setLastTask(lastTaskRes.data);
+        setSummary(summaryRes.data);
+        localStorage.setItem('cached_projects', JSON.stringify(projectsRes.data));
         localStorage.setItem('cached_tasks', JSON.stringify(tasksRes.data));
-        localStorage.setItem('cached_nonproductive_tasks', JSON.stringify(nonProductiveRes.data));
       } catch (e) {
-        console.error("Error fetching data:", e);
-        const cachedProjects = localStorage.getItem('cached_projects');
-        const cachedTasks = localStorage.getItem('cached_tasks');
-        const cachedNonProductive = localStorage.getItem('cached_nonproductive_tasks');
-        
-        if (cachedProjects) setProjects(JSON.parse(cachedProjects));
-        if (cachedTasks) setTasks(JSON.parse(cachedTasks));
-        if (cachedNonProductive) setNonProductiveTasks(JSON.parse(cachedNonProductive));
-        
-        if (cachedProjects || cachedTasks) {
-          toast.info("Načteno z cache (offline)");
-        } else {
-          toast.error("Nepodařilo se načíst data");
-        }
-      } finally {
-        setLoading(false);
-      }
+        const cp = localStorage.getItem('cached_projects');
+        const ct = localStorage.getItem('cached_tasks');
+        if (cp) setProjects(JSON.parse(cp));
+        if (ct) setTasks(JSON.parse(ct));
+      } finally { setLoading(false); }
     };
-    fetchData();
-  }, []);
+    if (employeeId) fetchData();
+  }, [employeeId]);
 
-  // Load timer from localStorage first, then check server
   useEffect(() => {
     const loadTimer = async () => {
       const localTimer = TimerStorage.get();
       if (localTimer && localTimer.employee_id === employeeId) {
         setActiveRecord(localTimer);
         setIsRunning(true);
-        
-        if (localTimer.is_non_productive) {
-          setMode('non-productive');
-          setSelectedNonProductiveTask(localTimer.task);
-        } else {
-          setMode('productive');
-          setSelectedTask(localTimer.task);
-        }
-        
+        if (localTimer.is_break) setMode('break');
+        else if (localTimer.is_non_productive) setMode('non-productive');
+        else setMode('productive');
         const startTime = new Date(localTimer.start_time).getTime();
-        const now = Date.now();
-        setElapsedTime(Math.floor((now - startTime) / 1000));
+        setElapsedTime(Math.floor((Date.now() - startTime) / 1000));
       }
-      
       if (isOnline && employeeId) {
         try {
           const response = await axios.get(`${API}/timer/active/${employeeId}`, { timeout: 10000 });
           if (response.data) {
-            const serverTimer = response.data;
-            setActiveRecord(serverTimer);
+            setActiveRecord(response.data);
             setIsRunning(true);
-            TimerStorage.save(serverTimer);
-            
-            if (serverTimer.is_non_productive) {
-              setMode('non-productive');
-              setSelectedNonProductiveTask(serverTimer.task);
-            } else {
-              setMode('productive');
-              const project = projects.find(p => p.id === serverTimer.project_id);
-              if (project) setSelectedProject(project);
-              setSelectedTask(serverTimer.task);
-            }
-            
-            const startTime = new Date(serverTimer.start_time).getTime();
-            const now = Date.now();
-            setElapsedTime(Math.floor((now - startTime) / 1000));
+            TimerStorage.save(response.data);
+            if (response.data.is_break) setMode('break');
+            else if (response.data.is_non_productive) setMode('non-productive');
+            else setMode('productive');
+            const startTime = new Date(response.data.start_time).getTime();
+            setElapsedTime(Math.floor((Date.now() - startTime) / 1000));
           } else if (!localTimer) {
             setIsRunning(false);
             setActiveRecord(null);
             TimerStorage.clear();
           }
-        } catch (e) {
-          console.error("Error checking server timer:", e);
-        }
+        } catch (e) {}
       }
     };
-    
-    if (projects.length > 0 || nonProductiveTasks.length > 0) {
-      loadTimer();
-    }
-  }, [employeeId, projects, nonProductiveTasks, isOnline]);
+    if (projects.length > 0) loadTimer();
+  }, [employeeId, projects, isOnline]);
 
-  // Timer effect
   useEffect(() => {
     let interval;
-    if (isRunning) {
-      interval = setInterval(() => {
-        setElapsedTime(prev => prev + 1);
-      }, 1000);
-    }
+    if (isRunning) interval = setInterval(() => setElapsedTime(prev => prev + 1), 1000);
     return () => clearInterval(interval);
   }, [isRunning]);
 
-  const formatTime = useCallback((seconds) => {
-    const hrs = Math.floor(seconds / 3600);
-    const mins = Math.floor((seconds % 3600) / 60);
-    const secs = seconds % 60;
-    return `${hrs.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-  }, []);
-
-  const handleStart = async () => {
-    if (mode === 'productive' && (!selectedProject || !selectedTask)) {
-      toast.error("Vyberte projekt a úkon");
-      return;
+  // Check for long running timer (> 4 hours)
+  useEffect(() => {
+    if (isRunning && elapsedTime > 4 * 3600 && elapsedTime % 1800 < 2) {
+      toast.warning(`Pracujete už ${Math.floor(elapsedTime/3600)} hodin. Nezapomněli jste zastavit čas?`);
     }
-    if (mode === 'non-productive' && !selectedNonProductiveTask) {
-      toast.error("Vyberte neproduktivní úkon");
-      return;
+  }, [isRunning, elapsedTime]);
+
+  const handleStart = async (repeatLast = false) => {
+    let taskData = {};
+    
+    if (repeatLast && lastTask) {
+      taskData = {
+        employee_id: employee.id,
+        employee_name: employee.name,
+        project_id: lastTask.project_id,
+        project_name: lastTask.project_name,
+        task: lastTask.task,
+        is_non_productive: lastTask.is_non_productive || false,
+        is_break: false
+      };
+    } else if (mode === 'break') {
+      taskData = {
+        employee_id: employee.id,
+        employee_name: employee.name,
+        task: 'PŘESTÁVKA',
+        is_non_productive: false,
+        is_break: true
+      };
+    } else if (mode === 'productive') {
+      if (!selectedProject || !selectedTask) { toast.error("Vyberte projekt a úkon"); return; }
+      taskData = {
+        employee_id: employee.id,
+        employee_name: employee.name,
+        project_id: selectedProject.id,
+        project_name: selectedProject.name,
+        task: selectedTask,
+        is_non_productive: false,
+        is_break: false
+      };
+    } else {
+      if (!selectedNonProductiveTask) { toast.error("Vyberte neproduktivní úkon"); return; }
+      taskData = {
+        employee_id: employee.id,
+        employee_name: employee.name,
+        task: selectedNonProductiveTask,
+        is_non_productive: true,
+        is_break: false
+      };
     }
 
-    const startTime = new Date().toISOString();
-    const localRecord = {
-      id: `local_${Date.now()}`,
-      employee_id: employee.id,
-      employee_name: employee.name,
-      is_non_productive: mode === 'non-productive',
-      start_time: startTime,
-      task: mode === 'productive' ? selectedTask : selectedNonProductiveTask,
-      project_id: mode === 'productive' ? selectedProject?.id : null,
-      project_name: mode === 'productive' ? selectedProject?.name : null
-    };
-
+    const localRecord = { id: `local_${Date.now()}`, ...taskData, start_time: new Date().toISOString() };
     TimerStorage.save(localRecord);
     setActiveRecord(localRecord);
     setIsRunning(true);
@@ -509,44 +381,17 @@ const TimerPage = () => {
 
     if (isOnline) {
       try {
-        const requestData = {
-          employee_id: employee.id,
-          employee_name: employee.name,
-          is_non_productive: mode === 'non-productive',
-          task: mode === 'productive' ? selectedTask : selectedNonProductiveTask
-        };
-
-        if (mode === 'productive') {
-          requestData.project_id = selectedProject.id;
-          requestData.project_name = selectedProject.name;
-        }
-
-        const response = await axios.post(`${API}/timer/start`, requestData, { timeout: 15000 });
-        const serverRecord = response.data;
-        TimerStorage.save(serverRecord);
-        setActiveRecord(serverRecord);
-        toast.success("Časomíra spuštěna");
-      } catch (e) {
-        console.error("Error starting timer on server:", e);
-        toast.warning("Spuštěno lokálně (offline)");
-      }
-    } else {
-      toast.warning("Spuštěno lokálně (offline)");
-    }
+        const response = await axios.post(`${API}/timer/start`, taskData, { timeout: 15000 });
+        TimerStorage.save(response.data);
+        setActiveRecord(response.data);
+        toast.success(mode === 'break' ? "Přestávka spuštěna" : "Časomíra spuštěna");
+      } catch (e) { toast.warning("Spuštěno lokálně (offline)"); }
+    } else { toast.warning("Spuštěno lokálně (offline)"); }
   };
 
   const handleStop = async () => {
     if (!activeRecord) return;
-
-    const endTime = new Date().toISOString();
-    const stopData = {
-      record_id: activeRecord.id,
-      end_time: endTime,
-      duration_seconds: elapsedTime,
-      task: activeRecord.task,
-      project_name: activeRecord.project_name
-    };
-
+    const stopData = { record_id: activeRecord.id, end_time: new Date().toISOString(), duration_seconds: elapsedTime };
     setIsRunning(false);
     setActiveRecord(null);
     setElapsedTime(0);
@@ -558,164 +403,143 @@ const TimerPage = () => {
     if (isOnline) {
       try {
         await axios.post(`${API}/timer/stop`, stopData, { timeout: 15000 });
-        toast.success("Čas uložen do Google Sheets");
+        toast.success("Čas uložen");
+        // Refresh summary
+        const summaryRes = await axios.get(`${API}/employee/${employeeId}/summary`, { timeout: 10000 });
+        setSummary(summaryRes.data);
+        const lastRes = await axios.get(`${API}/employee/${employeeId}/last-task`, { timeout: 10000 });
+        setLastTask(lastRes.data);
       } catch (e) {
-        console.error("Error stopping timer on server:", e);
         OfflineQueue.addPendingStop(stopData);
         setPendingStops(OfflineQueue.getPendingStops());
-        toast.warning("Uloženo lokálně - synchronizuje se při připojení");
+        toast.warning("Uloženo lokálně");
       }
     } else {
       OfflineQueue.addPendingStop(stopData);
       setPendingStops(OfflineQueue.getPendingStops());
-      toast.warning("Uloženo lokálně - synchronizuje se při připojení");
+      toast.warning("Uloženo lokálně");
     }
   };
 
-  const handleBack = () => {
-    if (isRunning) {
-      const confirm = window.confirm("Časomíra stále běží! Opravdu chcete odejít? Časomíra bude pokračovat.");
-      if (!confirm) return;
-    }
-    navigate('/');
-  };
-
-  const handleModeChange = (newMode) => {
-    if (isRunning) return;
-    setMode(newMode);
-    setSelectedProject(null);
-    setSelectedTask(null);
-    setSelectedNonProductiveTask(null);
-  };
-
-  if (loading || !employee) {
-    return (
-      <div className="loading-container" data-testid="loading-spinner">
-        <div className="spinner"></div>
-        <p>Načítání...</p>
-      </div>
-    );
-  }
+  if (loading || !employee) return <div className="loading-container"><div className="spinner"></div></div>;
 
   return (
-    <div className="timer-page" data-testid="timer-page">
+    <div className="timer-page">
       <ConnectionStatus isOnline={isOnline} pendingCount={pendingStops.length} />
       
       <div className="timer-header">
-        <button className="back-button" onClick={handleBack} data-testid="back-button">
-          ← Zpět
-        </button>
+        <button className="back-button" onClick={() => { if (isRunning && !window.confirm('Časomíra běží! Odejít?')) return; navigate('/'); }}>← Zpět</button>
         <div className="employee-info">
           {!isOnline && <WifiOff size={16} className="offline-icon" />}
           <User className="user-icon" />
-          <span data-testid="employee-name">{employee.name}</span>
+          <span>{employee.name}</span>
         </div>
       </div>
 
-      {/* Active Timer Display */}
-      <Card className={`timer-card ${isRunning ? (activeRecord?.is_non_productive ? 'running-nonproductive' : 'running') : ''}`} data-testid="timer-card">
+      {/* Today's Summary */}
+      {summary && !isRunning && (
+        <div className="today-summary">
+          <div className="summary-item">
+            <span className="summary-label">Dnes</span>
+            <span className="summary-value">{formatDuration(summary.today?.total_seconds)}</span>
+          </div>
+          <div className="summary-item">
+            <span className="summary-label">Tento týden</span>
+            <span className="summary-value">{formatDuration(summary.week?.total_seconds)}</span>
+          </div>
+          <button className="history-btn" onClick={() => setShowHistory(!showHistory)}>
+            <History size={18} />
+          </button>
+        </div>
+      )}
+
+      {/* History Panel */}
+      {showHistory && summary?.today?.records && (
+        <div className="history-panel">
+          <h3>Dnešní záznamy</h3>
+          {summary.today.records.length === 0 ? <p className="no-records">Žádné záznamy</p> : (
+            summary.today.records.slice(0, 10).map((r, i) => (
+              <div key={i} className={`history-item ${r.is_break ? 'break' : r.is_non_productive ? 'nonproductive' : ''}`}>
+                <div className="history-info">
+                  <span className="history-task">{r.project_name || r.task}</span>
+                  <span className="history-time">{formatDuration(r.duration_seconds)}</span>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      )}
+
+      {/* Timer Card */}
+      <Card className={`timer-card ${isRunning ? (activeRecord?.is_break ? 'running-break' : activeRecord?.is_non_productive ? 'running-nonproductive' : 'running') : ''}`}>
         <CardHeader>
           <CardTitle className="timer-title">
-            <Clock className="clock-icon" />
-            Časomíra
-            {isRunning && !isOnline && (
-              <span className="offline-badge">
-                <CloudOff size={14} />
-                Offline
-              </span>
-            )}
+            {activeRecord?.is_break ? <Coffee className="clock-icon" /> : <Clock className="clock-icon" />}
+            {activeRecord?.is_break ? 'Přestávka' : 'Časomíra'}
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="timer-display" data-testid="timer-display">
-            {formatTime(elapsedTime)}
-          </div>
+          <div className="timer-display">{formatTime(elapsedTime)}</div>
           {isRunning && activeRecord && (
-            <div className={`active-info ${activeRecord.is_non_productive ? 'nonproductive' : ''}`} data-testid="active-timer-info">
-              {activeRecord.is_non_productive ? (
+            <div className={`active-info ${activeRecord.is_break ? 'break' : activeRecord.is_non_productive ? 'nonproductive' : ''}`}>
+              {!activeRecord.is_break && (
                 <div className="info-row">
-                  <Wrench size={18} />
-                  <span>{activeRecord.task}</span>
-                  <span className="badge nonproductive-badge">Neproduktivní</span>
+                  {activeRecord.is_non_productive ? <Wrench size={18} /> : <Briefcase size={18} />}
+                  <span>{activeRecord.project_name || activeRecord.task}</span>
                 </div>
-              ) : (
-                <>
-                  <div className="info-row">
-                    <Briefcase size={18} />
-                    <span>{activeRecord.project_name}</span>
-                  </div>
-                  <div className="info-row">
-                    <Package size={18} />
-                    <span>{activeRecord.task}</span>
-                  </div>
-                </>
               )}
             </div>
           )}
         </CardContent>
       </Card>
 
+      {/* Quick Repeat Last Task */}
+      {!isRunning && lastTask && !lastTask.is_break && (
+        <button className="quick-repeat" onClick={() => handleStart(true)}>
+          <Repeat size={20} />
+          <div className="repeat-info">
+            <span className="repeat-label">Pokračovat v posledním</span>
+            <span className="repeat-task">{lastTask.project_name || lastTask.task}</span>
+          </div>
+          <Play size={20} />
+        </button>
+      )}
+
       {/* Mode Toggle */}
       {!isRunning && (
-        <div className="mode-toggle" data-testid="mode-toggle">
-          <button
-            className={`mode-button ${mode === 'productive' ? 'active' : ''}`}
-            onClick={() => handleModeChange('productive')}
-            data-testid="mode-productive"
-          >
-            <Briefcase size={20} />
-            Produktivní
+        <div className="mode-toggle three-way">
+          <button className={`mode-button ${mode === 'productive' ? 'active' : ''}`} onClick={() => setMode('productive')}>
+            <Briefcase size={18} />Produktivní
           </button>
-          <button
-            className={`mode-button nonproductive ${mode === 'non-productive' ? 'active' : ''}`}
-            onClick={() => handleModeChange('non-productive')}
-            data-testid="mode-nonproductive"
-          >
-            <Wrench size={20} />
-            Neproduktivní
+          <button className={`mode-button nonproductive ${mode === 'non-productive' ? 'active' : ''}`} onClick={() => setMode('non-productive')}>
+            <Wrench size={18} />Neprod.
+          </button>
+          <button className={`mode-button break ${mode === 'break' ? 'active' : ''}`} onClick={() => setMode('break')}>
+            <Coffee size={18} />Přestávka
           </button>
         </div>
       )}
 
-      {/* Selection Controls - Productive */}
+      {/* Selection Controls */}
       {!isRunning && mode === 'productive' && (
-        <div className="selection-section" data-testid="selection-section">
-          {/* Project Selector - Opens Modal */}
-          <button 
-            className="project-selector" 
-            onClick={() => setShowProjectModal(true)}
-            data-testid="project-selector"
-          >
+        <div className="selection-section">
+          <button className="project-selector" onClick={() => setShowProjectModal(true)}>
             <div className="selector-content">
               <Briefcase className="selector-icon" />
               <div className="selector-text">
                 <span className="selector-label">Projekt</span>
-                <span className="selector-value">
-                  {selectedProject ? selectedProject.name : 'Vyberte projekt...'}
-                </span>
+                <span className="selector-value">{selectedProject ? selectedProject.name : 'Vyberte projekt...'}</span>
               </div>
             </div>
             <ChevronRight size={24} />
           </button>
-
           <Card className="selection-card">
-            <CardHeader>
-              <CardTitle>
-                <Package className="section-icon" />
-                Úkon
-              </CardTitle>
-            </CardHeader>
+            <CardHeader><CardTitle><Package className="section-icon" />Úkon</CardTitle></CardHeader>
             <CardContent>
               <div className="task-grid">
                 {tasks.map((task) => (
-                  <button
-                    key={task.name}
-                    className={`task-button ${selectedTask === task.name ? 'selected' : ''}`}
-                    onClick={() => setSelectedTask(task.name)}
-                    data-testid={`task-btn-${task.name}`}
-                  >
-                    {task.name}
-                  </button>
+                  <button key={task.name} className={`task-button ${selectedTask === task.name ? 'selected' : ''}`}
+                    onClick={() => setSelectedTask(task.name)}>{task.name}</button>
                 ))}
               </div>
             </CardContent>
@@ -723,79 +547,148 @@ const TimerPage = () => {
         </div>
       )}
 
-      {/* Non-Productive Selection */}
       {!isRunning && mode === 'non-productive' && (
-        <div className="selection-section" data-testid="nonproductive-section">
+        <div className="selection-section">
           <Card className="selection-card nonproductive-card">
-            <CardHeader>
-              <CardTitle>
-                <Wrench className="section-icon" />
-                Neproduktivní úkon
-              </CardTitle>
-            </CardHeader>
+            <CardHeader><CardTitle><Wrench className="section-icon" />Neproduktivní úkon</CardTitle></CardHeader>
             <CardContent>
               <div className="task-grid">
                 {nonProductiveTasks.map((task) => (
-                  <button
-                    key={task.name}
-                    className={`task-button nonproductive ${selectedNonProductiveTask === task.name ? 'selected' : ''}`}
-                    onClick={() => setSelectedNonProductiveTask(task.name)}
-                    data-testid={`nonproductive-btn-${task.name}`}
-                  >
-                    {task.name}
-                  </button>
+                  <button key={task.name} className={`task-button nonproductive ${selectedNonProductiveTask === task.name ? 'selected' : ''}`}
+                    onClick={() => setSelectedNonProductiveTask(task.name)}>{task.name}</button>
                 ))}
               </div>
             </CardContent>
           </Card>
-          
-          <div className="nonproductive-hint">
-            <AlertTriangle size={16} />
-            <span>Neproduktivní úkony nejsou vázány na projekt</span>
-          </div>
+        </div>
+      )}
+
+      {!isRunning && mode === 'break' && (
+        <div className="break-info-card">
+          <Coffee size={32} />
+          <p>Kliknutím na START zahájíte přestávku</p>
         </div>
       )}
 
       {/* Action Buttons */}
       <div className="action-buttons">
         {!isRunning ? (
-          <Button
-            className={`start-button ${mode === 'non-productive' ? 'nonproductive' : ''}`}
-            onClick={handleStart}
-            disabled={mode === 'productive' ? (!selectedProject || !selectedTask) : !selectedNonProductiveTask}
-            data-testid="start-button"
-          >
-            <Play size={24} />
-            START
+          <Button className={`start-button ${mode === 'non-productive' ? 'nonproductive' : mode === 'break' ? 'break' : ''}`}
+            onClick={() => handleStart(false)}
+            disabled={mode === 'productive' ? (!selectedProject || !selectedTask) : mode === 'non-productive' ? !selectedNonProductiveTask : false}>
+            <Play size={24} />START
           </Button>
         ) : (
-          <Button
-            className="stop-button"
-            onClick={handleStop}
-            data-testid="stop-button"
-          >
-            <Square size={24} />
-            STOP
-          </Button>
+          <Button className="stop-button" onClick={handleStop}><Square size={24} />STOP</Button>
         )}
       </div>
 
-      {/* Pending Syncs Info */}
       {pendingStops.length > 0 && (
-        <div className="pending-syncs" data-testid="pending-syncs">
-          <CloudOff size={16} />
-          <span>{pendingStops.length} záznam(ů) čeká na synchronizaci</span>
+        <div className="pending-syncs"><CloudOff size={16} /><span>{pendingStops.length} záznam(ů) čeká</span></div>
+      )}
+
+      <ProjectPickerModal isOpen={showProjectModal} onClose={() => setShowProjectModal(false)} 
+        projects={projects} selectedProject={selectedProject} onSelect={setSelectedProject} />
+    </div>
+  );
+};
+
+// Admin Dashboard
+const AdminDashboard = () => {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const navigate = useNavigate();
+
+  const fetchData = async () => {
+    try {
+      const res = await axios.get(`${API}/admin/dashboard`, { timeout: 15000 });
+      setData(res.data);
+    } catch (e) { toast.error("Nepodařilo se načíst data"); }
+    finally { setLoading(false); }
+  };
+
+  useEffect(() => {
+    fetchData();
+    const interval = setInterval(fetchData, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
+  if (loading) return <div className="loading-container"><div className="spinner"></div></div>;
+
+  return (
+    <div className="admin-dashboard">
+      <div className="admin-header">
+        <button className="back-button" onClick={() => navigate('/')}>← Zpět</button>
+        <h1><BarChart3 size={24} /> Admin přehled</h1>
+        <button className="refresh-btn" onClick={fetchData}><RefreshCw size={20} /></button>
+      </div>
+
+      {/* Alerts */}
+      {data?.alerts?.length > 0 && (
+        <div className="alerts-section">
+          {data.alerts.map((alert, i) => (
+            <div key={i} className="alert-item">
+              <Bell size={18} />
+              <span>{alert.message}</span>
+            </div>
+          ))}
         </div>
       )}
 
-      {/* Project Picker Modal */}
-      <ProjectPickerModal
-        isOpen={showProjectModal}
-        onClose={() => setShowProjectModal(false)}
-        projects={projects}
-        selectedProject={selectedProject}
-        onSelect={setSelectedProject}
-      />
+      {/* Summary Cards */}
+      <div className="summary-cards">
+        <div className="stat-card">
+          <Users size={24} />
+          <div className="stat-info">
+            <span className="stat-value">{data?.summary?.working_now || 0}</span>
+            <span className="stat-label">Pracuje</span>
+          </div>
+        </div>
+        <div className="stat-card break">
+          <Coffee size={24} />
+          <div className="stat-info">
+            <span className="stat-value">{data?.summary?.on_break || 0}</span>
+            <span className="stat-label">Přestávka</span>
+          </div>
+        </div>
+        <div className="stat-card">
+          <TrendingUp size={24} />
+          <div className="stat-info">
+            <span className="stat-value">{formatDuration(data?.summary?.today_total_seconds)}</span>
+            <span className="stat-label">Dnes celkem</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Employee List */}
+      <div className="admin-employee-list">
+        <h2>Zaměstnanci ({data?.employees?.length || 0})</h2>
+        {data?.employees?.map((emp) => (
+          <div key={emp.employee_id} className={`admin-employee-item ${emp.is_working ? (emp.is_on_break ? 'on-break' : emp.is_non_productive ? 'nonproductive' : 'working') : ''}`}>
+            <div className="emp-main">
+              <User size={20} />
+              <div className="emp-info">
+                <span className="emp-name">{emp.employee_name}</span>
+                {emp.is_working && (
+                  <span className="emp-task">
+                    {emp.is_on_break ? <Coffee size={12} /> : <Timer size={12} />}
+                    {emp.current_project || emp.current_task}
+                  </span>
+                )}
+              </div>
+            </div>
+            <div className="emp-stats">
+              <span className="emp-today">{formatDuration(emp.today_seconds)}</span>
+              {emp.is_working && (
+                <span className={`emp-badge ${emp.is_on_break ? 'break' : emp.is_non_productive ? 'nonproductive' : ''}`}>
+                  <span className="pulse-dot-small"></span>
+                  {emp.is_on_break ? 'Přestávka' : emp.is_non_productive ? 'Neprod.' : 'Pracuje'}
+                </span>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 };
@@ -807,6 +700,7 @@ function App() {
         <Routes>
           <Route path="/" element={<EmployeeSelection />} />
           <Route path="/employee/:employeeId" element={<TimerPage />} />
+          <Route path="/admin" element={<AdminDashboard />} />
         </Routes>
       </BrowserRouter>
       <Toaster position="top-center" richColors />
