@@ -169,18 +169,24 @@ const ProjectPickerModal = ({ isOpen, onClose, projects, onSelect, selectedProje
 // Employee Selection Page
 const EmployeeSelection = () => {
   const [employees, setEmployees] = useState([]);
+  const [activeTimers, setActiveTimers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const navigate = useNavigate();
   const isOnline = useOnlineStatus();
 
   useEffect(() => {
-    const fetchEmployees = async () => {
+    const fetchData = async () => {
       try {
-        const response = await axios.get(`${API}/employees`, { timeout: 10000 });
+        const [employeesRes, timersRes] = await Promise.all([
+          axios.get(`${API}/employees`, { timeout: 10000 }),
+          axios.get(`${API}/timers/active`, { timeout: 10000 }).catch(() => ({ data: [] }))
+        ]);
+        
         // Sort alphabetically by name
-        const sorted = response.data.sort((a, b) => a.name.localeCompare(b.name, 'cs'));
+        const sorted = employeesRes.data.sort((a, b) => a.name.localeCompare(b.name, 'cs'));
         setEmployees(sorted);
+        setActiveTimers(timersRes.data || []);
         localStorage.setItem('cached_employees', JSON.stringify(sorted));
         setError(null);
       } catch (e) {
@@ -197,8 +203,24 @@ const EmployeeSelection = () => {
         setLoading(false);
       }
     };
-    fetchEmployees();
+    fetchData();
+    
+    // Refresh active timers every 30 seconds
+    const interval = setInterval(async () => {
+      try {
+        const res = await axios.get(`${API}/timers/active`, { timeout: 10000 });
+        setActiveTimers(res.data || []);
+      } catch (e) {
+        console.error("Error refreshing active timers:", e);
+      }
+    }, 30000);
+    
+    return () => clearInterval(interval);
   }, []);
+  
+  const getActiveTimer = (employeeId) => {
+    return activeTimers.find(t => t.employee_id === employeeId);
+  };
 
   const handleSelectEmployee = (employee) => {
     localStorage.setItem(STORAGE_KEYS.SELECTED_EMPLOYEE, JSON.stringify(employee));
