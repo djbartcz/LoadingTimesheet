@@ -689,14 +689,14 @@ const AdminDashboard = () => {
       <div className="admin-employee-list">
         <h2>Zaměstnanci ({data?.employees?.length || 0})</h2>
         {data?.employees?.map((emp) => (
-          <div key={emp.employee_id} className={`admin-employee-item ${emp.is_working ? (emp.is_on_break ? 'on-break' : emp.is_non_productive ? 'nonproductive' : 'working') : ''}`}>
+          <div key={emp.employee_id} className={`admin-employee-item ${emp.is_working ? (emp.is_non_productive ? 'nonproductive' : 'working') : ''}`}>
             <div className="emp-main">
               <User size={20} />
               <div className="emp-info">
                 <span className="emp-name">{emp.employee_name}</span>
                 {emp.is_working && (
                   <span className="emp-task">
-                    {emp.is_on_break ? <Coffee size={12} /> : <Timer size={12} />}
+                    <Timer size={12} />
                     {emp.current_project || emp.current_task}
                   </span>
                 )}
@@ -705,9 +705,9 @@ const AdminDashboard = () => {
             <div className="emp-stats">
               <span className="emp-today">{formatDuration(emp.today_seconds)}</span>
               {emp.is_working && (
-                <span className={`emp-badge ${emp.is_on_break ? 'break' : emp.is_non_productive ? 'nonproductive' : ''}`}>
+                <span className={`emp-badge ${emp.is_non_productive ? 'nonproductive' : ''}`}>
                   <span className="pulse-dot-small"></span>
-                  {emp.is_on_break ? 'Přestávka' : emp.is_non_productive ? 'Neprod.' : 'Pracuje'}
+                  {emp.is_non_productive ? 'Neprod.' : 'Pracuje'}
                 </span>
               )}
             </div>
