@@ -676,13 +676,6 @@ const AdminDashboard = () => {
             <span className="stat-label">Pracuje</span>
           </div>
         </div>
-        <div className="stat-card break">
-          <Coffee size={24} />
-          <div className="stat-info">
-            <span className="stat-value">{data?.summary?.on_break || 0}</span>
-            <span className="stat-label">Přestávka</span>
-          </div>
-        </div>
         <div className="stat-card">
           <TrendingUp size={24} />
           <div className="stat-info">
