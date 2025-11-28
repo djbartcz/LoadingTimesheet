@@ -560,13 +560,6 @@ const TimerPage = () => {
         </div>
       )}
 
-      {!isRunning && mode === 'break' && (
-        <div className="break-info-card">
-          <Coffee size={32} />
-          <p>Kliknutím na START zahájíte přestávku</p>
-        </div>
-      )}
-
       {/* Action Buttons */}
       <div className="action-buttons">
         {!isRunning ? (
