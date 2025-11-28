@@ -220,6 +220,10 @@ body {
   font-weight: 500;
 }
 
+.employee-status.nonproductive {
+  color: var(--accent-orange);
+}
+
 .employee-status .status-icon {
   animation: pulse 2s ease-in-out infinite;
 }
@@ -237,12 +241,21 @@ body {
   flex-shrink: 0;
 }
 
+.working-badge.nonproductive {
+  background: rgba(234, 88, 12, 0.15);
+  color: var(--accent-orange);
+}
+
 .pulse-dot {
   width: 8px;
   height: 8px;
   background: var(--accent-success);
   border-radius: 50%;
   animation: pulseDot 2s ease-in-out infinite;
+}
+
+.pulse-dot.nonproductive {
+  background: var(--accent-orange);
 }
 
 @keyframes pulseDot {
