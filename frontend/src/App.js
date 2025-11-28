@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
-import { Play, Square, Clock, User, Briefcase, Package, AlertTriangle, Wrench, WifiOff, CloudOff, RefreshCw, X, ChevronRight, Search } from "lucide-react";
+import { Play, Square, Clock, User, Briefcase, Package, AlertTriangle, Wrench, WifiOff, CloudOff, RefreshCw, X, ChevronRight, Search, Timer } from "lucide-react";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
