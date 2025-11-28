@@ -242,7 +242,7 @@ const EmployeeSelection = () => {
       
       <div className="header">
         <Clock className="header-icon" />
-        <h1>Časomíra nakládky</h1>
+        <h1>Evidence pracovní doby</h1>
         <p>Vyberte své jméno</p>
       </div>
       
