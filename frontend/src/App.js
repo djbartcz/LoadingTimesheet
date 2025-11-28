@@ -4,10 +4,9 @@ import { BrowserRouter, Routes, Route, useNavigate, useParams } from "react-rout
 import axios from "axios";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
-import { Play, Square, Clock, User, Briefcase, Package, AlertTriangle, Wrench, WifiOff, Wifi, CloudOff, RefreshCw } from "lucide-react";
+import { Play, Square, Clock, User, Briefcase, Package, AlertTriangle, Wrench, WifiOff, CloudOff, RefreshCw, X, ChevronRight, Search } from "lucide-react";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -88,7 +87,7 @@ const useOnlineStatus = () => {
 };
 
 // Connection Status Component
-const ConnectionStatus = ({ isOnline, pendingCount, onSync }) => {
+const ConnectionStatus = ({ isOnline, pendingCount }) => {
   if (isOnline && pendingCount === 0) return null;
   
   return (
@@ -108,6 +107,65 @@ const ConnectionStatus = ({ isOnline, pendingCount, onSync }) => {
   );
 };
 
+// Fullscreen Project Picker Modal
+const ProjectPickerModal = ({ isOpen, onClose, projects, onSelect, selectedProject }) => {
+  const [searchTerm, setSearchTerm] = useState('');
+  
+  if (!isOpen) return null;
+  
+  const filteredProjects = projects.filter(p => 
+    p.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    p.id.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+  
+  return (
+    <div className="fullscreen-modal" data-testid="project-modal">
+      <div className="modal-header">
+        <h2>Vyberte projekt</h2>
+        <button className="modal-close" onClick={onClose} data-testid="modal-close">
+          <X size={28} />
+        </button>
+      </div>
+      
+      <div className="modal-search">
+        <Search size={20} />
+        <input
+          type="text"
+          placeholder="Hledat projekt..."
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          data-testid="project-search"
+        />
+      </div>
+      
+      <div className="modal-list">
+        {filteredProjects.map((project) => (
+          <button
+            key={project.id}
+            className={`modal-list-item ${selectedProject?.id === project.id ? 'selected' : ''}`}
+            onClick={() => {
+              onSelect(project);
+              onClose();
+            }}
+            data-testid={`project-item-${project.id}`}
+          >
+            <div className="item-content">
+              <span className="item-id">{project.id}</span>
+              <span className="item-name">{project.name}</span>
+            </div>
+            <ChevronRight size={24} />
+          </button>
+        ))}
+        {filteredProjects.length === 0 && (
+          <div className="modal-empty">
+            <p>Žádné projekty nenalezeny</p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
 // Employee Selection Page
 const EmployeeSelection = () => {
   const [employees, setEmployees] = useState([]);
@@ -120,13 +178,13 @@ const EmployeeSelection = () => {
     const fetchEmployees = async () => {
       try {
         const response = await axios.get(`${API}/employees`, { timeout: 10000 });
-        setEmployees(response.data);
-        // Cache employees for offline use
-        localStorage.setItem('cached_employees', JSON.stringify(response.data));
+        // Sort alphabetically by name
+        const sorted = response.data.sort((a, b) => a.name.localeCompare(b.name, 'cs'));
+        setEmployees(sorted);
+        localStorage.setItem('cached_employees', JSON.stringify(sorted));
         setError(null);
       } catch (e) {
         console.error("Error fetching employees:", e);
-        // Try to load from cache
         const cached = localStorage.getItem('cached_employees');
         if (cached) {
           setEmployees(JSON.parse(cached));
@@ -163,10 +221,10 @@ const EmployeeSelection = () => {
       <div className="header">
         <Clock className="header-icon" />
         <h1>Časomíra nakládky</h1>
-        <p>Vyberte své jméno pro zahájení</p>
+        <p>Vyberte své jméno</p>
       </div>
       
-      <div className="employees-grid">
+      <div className="employees-list">
         {employees.length === 0 ? (
           <div className="empty-state" data-testid="no-employees">
             <User size={48} />
@@ -177,12 +235,13 @@ const EmployeeSelection = () => {
           employees.map((employee) => (
             <button
               key={employee.id}
-              className="employee-button"
+              className="employee-list-item"
               onClick={() => handleSelectEmployee(employee)}
               data-testid={`employee-btn-${employee.id}`}
             >
               <User className="employee-icon" />
               <span className="employee-name">{employee.name}</span>
+              <ChevronRight className="chevron" />
             </button>
           ))
         )}
@@ -210,6 +269,7 @@ const TimerPage = () => {
   const [loading, setLoading] = useState(true);
   const [pendingStops, setPendingStops] = useState([]);
   const [syncing, setSyncing] = useState(false);
+  const [showProjectModal, setShowProjectModal] = useState(false);
   const syncingRef = useRef(false);
 
   // Load employee from localStorage
@@ -250,7 +310,6 @@ const TimerPage = () => {
           toast.success(`Synchronizováno: ${stopData.task || 'záznam'}`);
         } catch (e) {
           console.error("Sync failed:", e);
-          // Keep in queue for retry
         }
       }
       
@@ -271,17 +330,18 @@ const TimerPage = () => {
           axios.get(`${API}/tasks`, { timeout: 10000 }),
           axios.get(`${API}/non-productive-tasks`, { timeout: 10000 })
         ]);
-        setProjects(projectsRes.data);
+        
+        // Sort projects alphabetically
+        const sortedProjects = projectsRes.data.sort((a, b) => a.name.localeCompare(b.name, 'cs'));
+        setProjects(sortedProjects);
         setTasks(tasksRes.data);
         setNonProductiveTasks(nonProductiveRes.data);
         
-        // Cache for offline
-        localStorage.setItem('cached_projects', JSON.stringify(projectsRes.data));
+        localStorage.setItem('cached_projects', JSON.stringify(sortedProjects));
         localStorage.setItem('cached_tasks', JSON.stringify(tasksRes.data));
         localStorage.setItem('cached_nonproductive_tasks', JSON.stringify(nonProductiveRes.data));
       } catch (e) {
         console.error("Error fetching data:", e);
-        // Load from cache
         const cachedProjects = localStorage.getItem('cached_projects');
         const cachedTasks = localStorage.getItem('cached_tasks');
         const cachedNonProductive = localStorage.getItem('cached_nonproductive_tasks');
@@ -305,7 +365,6 @@ const TimerPage = () => {
   // Load timer from localStorage first, then check server
   useEffect(() => {
     const loadTimer = async () => {
-      // First check localStorage
       const localTimer = TimerStorage.get();
       if (localTimer && localTimer.employee_id === employeeId) {
         setActiveRecord(localTimer);
@@ -319,13 +378,11 @@ const TimerPage = () => {
           setSelectedTask(localTimer.task);
         }
         
-        // Calculate elapsed from stored start_time
         const startTime = new Date(localTimer.start_time).getTime();
         const now = Date.now();
         setElapsedTime(Math.floor((now - startTime) / 1000));
       }
       
-      // Then try to sync with server if online
       if (isOnline && employeeId) {
         try {
           const response = await axios.get(`${API}/timer/active/${employeeId}`, { timeout: 10000 });
@@ -349,14 +406,12 @@ const TimerPage = () => {
             const now = Date.now();
             setElapsedTime(Math.floor((now - startTime) / 1000));
           } else if (!localTimer) {
-            // No timer on server and no local timer
             setIsRunning(false);
             setActiveRecord(null);
             TimerStorage.clear();
           }
         } catch (e) {
           console.error("Error checking server timer:", e);
-          // Keep using local timer if exists
         }
       }
     };
@@ -366,7 +421,7 @@ const TimerPage = () => {
     }
   }, [employeeId, projects, nonProductiveTasks, isOnline]);
 
-  // Timer effect - runs locally
+  // Timer effect
   useEffect(() => {
     let interval;
     if (isRunning) {
@@ -406,13 +461,11 @@ const TimerPage = () => {
       project_name: mode === 'productive' ? selectedProject?.name : null
     };
 
-    // Save locally first
     TimerStorage.save(localRecord);
     setActiveRecord(localRecord);
     setIsRunning(true);
     setElapsedTime(0);
 
-    // Try to sync with server
     if (isOnline) {
       try {
         const requestData = {
@@ -428,8 +481,6 @@ const TimerPage = () => {
         }
 
         const response = await axios.post(`${API}/timer/start`, requestData, { timeout: 15000 });
-        
-        // Update with server response
         const serverRecord = response.data;
         TimerStorage.save(serverRecord);
         setActiveRecord(serverRecord);
@@ -451,12 +502,10 @@ const TimerPage = () => {
       record_id: activeRecord.id,
       end_time: endTime,
       duration_seconds: elapsedTime,
-      // Store extra info for offline display
       task: activeRecord.task,
       project_name: activeRecord.project_name
     };
 
-    // Clear local state
     setIsRunning(false);
     setActiveRecord(null);
     setElapsedTime(0);
@@ -465,20 +514,17 @@ const TimerPage = () => {
     setSelectedNonProductiveTask(null);
     TimerStorage.clear();
 
-    // Try to sync with server
     if (isOnline) {
       try {
         await axios.post(`${API}/timer/stop`, stopData, { timeout: 15000 });
         toast.success("Čas uložen do Google Sheets");
       } catch (e) {
         console.error("Error stopping timer on server:", e);
-        // Save to offline queue
         OfflineQueue.addPendingStop(stopData);
         setPendingStops(OfflineQueue.getPendingStops());
         toast.warning("Uloženo lokálně - synchronizuje se při připojení");
       }
     } else {
-      // Save to offline queue
       OfflineQueue.addPendingStop(stopData);
       setPendingStops(OfflineQueue.getPendingStops());
       toast.warning("Uloženo lokálně - synchronizuje se při připojení");
@@ -593,34 +639,23 @@ const TimerPage = () => {
       {/* Selection Controls - Productive */}
       {!isRunning && mode === 'productive' && (
         <div className="selection-section" data-testid="selection-section">
-          <Card className="selection-card">
-            <CardHeader>
-              <CardTitle>
-                <Briefcase className="section-icon" />
-                Projekt
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <Select
-                value={selectedProject?.id || ""}
-                onValueChange={(value) => {
-                  const project = projects.find(p => p.id === value);
-                  setSelectedProject(project);
-                }}
-              >
-                <SelectTrigger className="select-trigger" data-testid="project-select">
-                  <SelectValue placeholder="Vyberte projekt" />
-                </SelectTrigger>
-                <SelectContent>
-                  {projects.map((project) => (
-                    <SelectItem key={project.id} value={project.id} data-testid={`project-option-${project.id}`}>
-                      {project.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </CardContent>
-          </Card>
+          {/* Project Selector - Opens Modal */}
+          <button 
+            className="project-selector" 
+            onClick={() => setShowProjectModal(true)}
+            data-testid="project-selector"
+          >
+            <div className="selector-content">
+              <Briefcase className="selector-icon" />
+              <div className="selector-text">
+                <span className="selector-label">Projekt</span>
+                <span className="selector-value">
+                  {selectedProject ? selectedProject.name : 'Vyberte projekt...'}
+                </span>
+              </div>
+            </div>
+            <ChevronRight size={24} />
+          </button>
 
           <Card className="selection-card">
             <CardHeader>
@@ -711,6 +746,15 @@ const TimerPage = () => {
           <span>{pendingStops.length} záznam(ů) čeká na synchronizaci</span>
         </div>
       )}
+
+      {/* Project Picker Modal */}
+      <ProjectPickerModal
+        isOpen={showProjectModal}
+        onClose={() => setShowProjectModal(false)}
+        projects={projects}
+        selectedProject={selectedProject}
+        onSelect={setSelectedProject}
+      />
     </div>
   );
 };
