@@ -507,15 +507,12 @@ const TimerPage = () => {
 
       {/* Mode Toggle */}
       {!isRunning && (
-        <div className="mode-toggle three-way">
+        <div className="mode-toggle">
           <button className={`mode-button ${mode === 'productive' ? 'active' : ''}`} onClick={() => setMode('productive')}>
             <Briefcase size={18} />Produktivní
           </button>
           <button className={`mode-button nonproductive ${mode === 'non-productive' ? 'active' : ''}`} onClick={() => setMode('non-productive')}>
-            <Wrench size={18} />Neprod.
-          </button>
-          <button className={`mode-button break ${mode === 'break' ? 'active' : ''}`} onClick={() => setMode('break')}>
-            <Coffee size={18} />Přestávka
+            <Wrench size={18} />Neproduktivní
           </button>
         </div>
       )}
