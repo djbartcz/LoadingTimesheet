@@ -1,0 +1,37 @@
+# ============================================
+# LoadingTimesheet Backend .env File Template
+# ============================================
+# Copy this content to backend\.env file
+# Replace values with your actual configuration
+# ============================================
+
+# PostgreSQL Database Configuration
+# Option 1: Use separate variables (recommended)
+DB_NAME=timesheet_db
+DB_USER=postgres
+DB_PASSWORD=postgres
+DB_HOST=localhost
+DB_PORT=5432
+
+# Option 2: Use single DATABASE_URL (alternative)
+# DATABASE_URL=postgresql://postgres:postgres@localhost:5432/timesheet_db
+
+# Note: Make sure the database exists in PostgreSQL
+# You can create it with: CREATE DATABASE timesheet_db;
+
+# Excel File Configuration
+# Use the FULL absolute path to your Excel file
+# Replace with your actual file path:
+EXCEL_FILE_PATH=C:\Users\admsoc\Desktop\LoadingTimesheet\backend\Timesheet System.xlsx
+
+# CORS Configuration
+# Allow frontend to connect from these URLs (comma-separated)
+# Add your frontend URL(s) here
+CORS_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
+
+# Optional: Server Port (default is 8000)
+# PORT=8000
+
+# Optional: Server Host (default is 0.0.0.0)
+# HOST=0.0.0.0
+

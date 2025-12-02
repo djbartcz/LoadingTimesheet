@@ -9,46 +9,34 @@ from pathlib import Path
 from pydantic import BaseModel, Field, ConfigDict
 from typing import List, Optional
 import uuid
-from datetime import datetime, timezone
-import gspread
-from google.oauth2.service_account import Credentials
-import json
+from datetime import datetime, timezone, timedelta
+from excel_client import init_excel_client
+import excel_client as excel_client_module
+from database import init_db, close_db
+import database as database_module
 
 ROOT_DIR = Path(__file__).parent
 PROJECT_ROOT = ROOT_DIR.parent
 load_dotenv(ROOT_DIR / '.env')
 
-# MongoDB connection
-mongo_url = os.environ['MONGO_URL']
-client = AsyncIOMotorClient(mongo_url)
-db = client[os.environ['DB_NAME']]
-
-# Google Sheets setup
-SCOPES = [
-    'https://www.googleapis.com/auth/spreadsheets',
-    'https://www.googleapis.com/auth/drive'
-]
-
-# Load credentials from environment
-google_creds_json = os.environ.get('GOOGLE_SERVICE_ACCOUNT_JSON', '')
-SPREADSHEET_ID = os.environ.get('GOOGLE_SPREADSHEET_ID', '')
-
-gc = None
-spreadsheet = None
-
-def init_google_sheets():
-    global gc, spreadsheet
-    if google_creds_json and SPREADSHEET_ID:
-        try:
-            creds_dict = json.loads(google_creds_json)
-            credentials = Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
-            gc = gspread.authorize(credentials)
-            spreadsheet = gc.open_by_key(SPREADSHEET_ID)
-            logging.info("Google Sheets connection established")
-        except Exception as e:
-            logging.error(f"Failed to connect to Google Sheets: {e}")
-
-init_google_sheets()
+# Excel file setup
+EXCEL_FILE_PATH = os.environ.get('EXCEL_FILE_PATH', '').strip()
+# Remove quotes if present
+EXCEL_FILE_PATH = EXCEL_FILE_PATH.strip('"').strip("'")
+# Handle line breaks in .env file (common issue with spaces in paths)
+if EXCEL_FILE_PATH and '\n' in EXCEL_FILE_PATH:
+    EXCEL_FILE_PATH = EXCEL_FILE_PATH.split('\n')[0].strip()
+if EXCEL_FILE_PATH and '\r' in EXCEL_FILE_PATH:
+    EXCEL_FILE_PATH = EXCEL_FILE_PATH.split('\r')[0].strip()
+if EXCEL_FILE_PATH:
+    try:
+        init_excel_client(EXCEL_FILE_PATH)
+        logging.info(f"Excel client initialized with file: {EXCEL_FILE_PATH}")
+    except Exception as e:
+        logging.error(f"Failed to initialize Excel client: {e}")
+        logging.error(f"Excel path was: {repr(EXCEL_FILE_PATH)}")
+else:
+    logging.warning("EXCEL_FILE_PATH not set - Excel features will be disabled")
 
 app = FastAPI()
 api_router = APIRouter(prefix="/api")
@@ -96,15 +84,7 @@ class StopTimerRequest(BaseModel):
     end_time: str
     duration_seconds: int
 
-# Helper functions
-def get_or_create_worksheet(name: str, headers: List[str]):
-    """Get or create a worksheet with headers"""
-    try:
-        worksheet = spreadsheet.worksheet(name)
-    except gspread.WorksheetNotFound:
-        worksheet = spreadsheet.add_worksheet(title=name, rows=1000, cols=20)
-        worksheet.append_row(headers)
-    return worksheet
+# Helper functions (now handled by excel_client)
 
 def get_today_start():
     now = datetime.now(timezone.utc)
@@ -121,9 +101,9 @@ async def root():
 
 @api_router.get("/employees", response_model=List[Employee])
 async def get_employees():
-    """Get all employees from Google Sheets"""
-    if not spreadsheet:
-        raise HTTPException(status_code=500, detail="Google Sheets not configured")
+    """Get all employees from Excel file"""
+    if not excel_client_module.excel_client:
+        raise HTTPException(status_code=500, detail="Excel file not configured")
     
     try:
         excel_client_module.excel_client.get_or_create_worksheet("Zaměstnanci", ["ID", "Jméno"])
@@ -136,9 +116,9 @@ async def get_employees():
 
 @api_router.get("/projects", response_model=List[Project])
 async def get_projects():
-    """Get all projects from Google Sheets"""
-    if not spreadsheet:
-        raise HTTPException(status_code=500, detail="Google Sheets not configured")
+    """Get all projects from Excel file"""
+    if not excel_client_module.excel_client:
+        raise HTTPException(status_code=500, detail="Excel file not configured")
     
     try:
         excel_client_module.excel_client.get_or_create_worksheet("Projekty", ["ID", "Název"])
@@ -151,13 +131,13 @@ async def get_projects():
 
 @api_router.get("/tasks", response_model=List[Task])
 async def get_tasks():
-    """Get all tasks from Google Sheets"""
-    if not spreadsheet:
-        raise HTTPException(status_code=500, detail="Google Sheets not configured")
+    """Get all tasks from Excel file"""
+    if not excel_client_module.excel_client:
+        raise HTTPException(status_code=500, detail="Excel file not configured")
     
     try:
-        worksheet = get_or_create_worksheet("Úkony", ["Název"])
-        records = worksheet.get_all_records()
+        excel_client_module.excel_client.get_or_create_worksheet("Úkony", ["Název"])
+        records = excel_client_module.excel_client.get_worksheet_data("Úkony")
         
         # If empty, add default tasks
         if not records:
@@ -174,13 +154,13 @@ async def get_tasks():
 
 @api_router.get("/non-productive-tasks", response_model=List[NonProductiveTask])
 async def get_non_productive_tasks():
-    """Get all non-productive tasks from Google Sheets"""
-    if not spreadsheet:
-        raise HTTPException(status_code=500, detail="Google Sheets not configured")
+    """Get all non-productive tasks from Excel file"""
+    if not excel_client_module.excel_client:
+        raise HTTPException(status_code=500, detail="Excel file not configured")
     
     try:
-        worksheet = get_or_create_worksheet("Neproduktivní úkony", ["Název"])
-        records = worksheet.get_all_records()
+        excel_client_module.excel_client.get_or_create_worksheet("Neproduktivní úkony", ["Název"])
+        records = excel_client_module.excel_client.get_worksheet_data("Neproduktivní úkony")
         
         # If empty, add default non-productive tasks
         if not records:
@@ -197,7 +177,7 @@ async def get_non_productive_tasks():
 
 @api_router.post("/timer/start", response_model=TimeRecord)
 async def start_timer(request: StartTimerRequest):
-    """Start a new timer - stores in MongoDB for real-time tracking"""
+    """Start a new timer - stores in PostgreSQL for real-time tracking"""
     try:
         if not database_module.pool:
             raise HTTPException(status_code=500, detail="Database not configured")
@@ -213,8 +193,22 @@ async def start_timer(request: StartTimerRequest):
             start_time=datetime.now(timezone.utc).isoformat()
         )
         
-        doc = record.model_dump()
-        await db.active_timers.insert_one(doc)
+        # Insert into PostgreSQL
+        async with database_module.pool.acquire() as conn:
+            await conn.execute("""
+                INSERT INTO active_timers 
+                (id, employee_id, employee_name, project_id, project_name, task, is_non_productive, start_time)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            """, 
+                record.id,
+                record.employee_id,
+                record.employee_name,
+                record.project_id,
+                record.project_name,
+                record.task,
+                record.is_non_productive,
+                datetime.fromisoformat(record.start_time.replace('Z', '+00:00'))
+            )
         
         return record
     except Exception as e:
@@ -223,33 +217,48 @@ async def start_timer(request: StartTimerRequest):
 
 @api_router.post("/timer/stop")
 async def stop_timer(request: StopTimerRequest):
-    """Stop a timer and save to Google Sheets"""
+    """Stop a timer and save to Excel file"""
     try:
-        # Get the active timer from MongoDB
-        timer = await db.active_timers.find_one({"id": request.record_id})
-        if not timer:
-            raise HTTPException(status_code=404, detail="Timer not found")
+        if not database_module.pool:
+            raise HTTPException(status_code=500, detail="Database not configured")
         
-        # Update timer with end time
-        timer['end_time'] = request.end_time
-        timer['duration_seconds'] = request.duration_seconds
+        # Get the active timer from PostgreSQL
+        async with database_module.pool.acquire() as conn:
+            timer_row = await conn.fetchrow("""
+                SELECT id, employee_id, employee_name, project_id, project_name, 
+                       task, is_non_productive, start_time
+                FROM active_timers
+                WHERE id = $1
+            """, request.record_id)
+            
+            if not timer_row:
+                raise HTTPException(status_code=404, detail="Timer not found")
+            
+            # Convert row to dict
+            timer = dict(timer_row)
+            timer['end_time'] = request.end_time
+            timer['duration_seconds'] = request.duration_seconds
         
         hours = request.duration_seconds // 3600
         minutes = (request.duration_seconds % 3600) // 60
         seconds = request.duration_seconds % 60
         duration_formatted = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
         
-        # Parse times for Google Sheets
-        start_dt = datetime.fromisoformat(timer['start_time'].replace('Z', '+00:00'))
+        # Parse times for Excel
+        start_time = timer['start_time']
+        if isinstance(start_time, datetime):
+            start_dt = start_time
+        else:
+            start_dt = datetime.fromisoformat(str(start_time).replace('Z', '+00:00'))
         end_dt = datetime.fromisoformat(request.end_time.replace('Z', '+00:00'))
         
-        # Save to Google Sheets - different sheet based on type
-        if spreadsheet:
+        # Save to Excel file - different sheet based on type
+        if excel_client_module.excel_client:
             is_non_productive = timer.get('is_non_productive', False)
             
             if is_non_productive:
                 # Save to non-productive records sheet
-                worksheet = get_or_create_worksheet("Neproduktivní záznamy", [
+                excel_client_module.excel_client.get_or_create_worksheet("Neproduktivní záznamy", [
                     "Datum", "Zaměstnanec ID", "Zaměstnanec", "Úkon", 
                     "Začátek", "Konec", "Doba trvání", "Doba (sekundy)"
                 ])
@@ -266,7 +275,7 @@ async def stop_timer(request: StopTimerRequest):
                 excel_client_module.excel_client.append_row("Neproduktivní záznamy", row)
             else:
                 # Save to productive records sheet
-                worksheet = get_or_create_worksheet("Záznamy", [
+                excel_client_module.excel_client.get_or_create_worksheet("Záznamy", [
                     "Datum", "Zaměstnanec ID", "Zaměstnanec", "Projekt ID", "Projekt", 
                     "Úkon", "Začátek", "Konec", "Doba trvání", "Doba (sekundy)"
                 ])
@@ -282,14 +291,31 @@ async def stop_timer(request: StopTimerRequest):
                     duration_formatted,
                     request.duration_seconds
                 ]
+                excel_client_module.excel_client.append_row("Záznamy", row)
+        
+        # Remove from active timers and save to history
+        async with database_module.pool.acquire() as conn:
+            # Delete from active_timers
+            await conn.execute("DELETE FROM active_timers WHERE id = $1", request.record_id)
             
-            worksheet.append_row(row)
-        
-        # Remove from active timers
-        await db.active_timers.delete_one({"id": request.record_id})
-        
-        # Also save to MongoDB for history
-        await db.time_records.insert_one(timer)
+            # Save to time_records
+            await conn.execute("""
+                INSERT INTO time_records 
+                (id, employee_id, employee_name, project_id, project_name, task, 
+                 is_non_productive, start_time, end_time, duration_seconds)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            """,
+                timer['id'],
+                timer['employee_id'],
+                timer['employee_name'],
+                timer.get('project_id'),
+                timer.get('project_name'),
+                timer['task'],
+                timer.get('is_non_productive', False),
+                timer['start_time'],
+                datetime.fromisoformat(request.end_time.replace('Z', '+00:00')),
+                request.duration_seconds
+            )
         
         return {"success": True, "message": "Timer stopped and saved to Excel file"}
     except HTTPException:
@@ -301,10 +327,24 @@ async def stop_timer(request: StopTimerRequest):
 @api_router.get("/timer/active/{employee_id}")
 async def get_active_timer(employee_id: str):
     try:
-        timer = await db.active_timers.find_one({"employee_id": employee_id}, {"_id": 0})
-        if timer:
-            return timer
-        return None
+        if not database_module.pool:
+            return None
+        
+        async with database_module.pool.acquire() as conn:
+            timer_row = await conn.fetchrow("""
+                SELECT id, employee_id, employee_name, project_id, project_name, 
+                       task, is_non_productive, start_time
+                FROM active_timers
+                WHERE employee_id = $1
+            """, employee_id)
+            
+            if timer_row:
+                timer = dict(timer_row)
+                # Convert start_time to ISO format string
+                if isinstance(timer['start_time'], datetime):
+                    timer['start_time'] = timer['start_time'].isoformat()
+                return timer
+            return None
     except Exception as e:
         logging.error(f"Error getting active timer: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -312,8 +352,25 @@ async def get_active_timer(employee_id: str):
 @api_router.get("/timers/active")
 async def get_all_active_timers():
     try:
-        timers = await db.active_timers.find({}, {"_id": 0}).to_list(1000)
-        return timers
+        if not database_module.pool:
+            return []
+        
+        async with database_module.pool.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT id, employee_id, employee_name, project_id, project_name, 
+                       task, is_non_productive, start_time
+                FROM active_timers
+            """)
+            
+            timers = []
+            for row in rows:
+                timer = dict(row)
+                # Convert start_time to ISO format string
+                if isinstance(timer['start_time'], datetime):
+                    timer['start_time'] = timer['start_time'].isoformat()
+                timers.append(timer)
+            
+            return timers
     except Exception as e:
         logging.error(f"Error getting active timers: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -322,12 +379,28 @@ async def get_all_active_timers():
 async def get_last_task(employee_id: str):
     """Get the last completed task for quick repeat"""
     try:
-        last_record = await db.time_records.find_one(
-            {"employee_id": employee_id, "is_break": {"$ne": True}},
-            {"_id": 0},
-            sort=[("end_time", -1)]
-        )
-        return last_record
+        if not database_module.pool:
+            return None
+        
+        async with database_module.pool.acquire() as conn:
+            row = await conn.fetchrow("""
+                SELECT id, employee_id, employee_name, project_id, project_name, 
+                       task, is_non_productive, start_time, end_time, duration_seconds
+                FROM time_records
+                WHERE employee_id = $1 AND end_time IS NOT NULL
+                ORDER BY end_time DESC
+                LIMIT 1
+            """, employee_id)
+            
+            if row:
+                record = dict(row)
+                # Convert datetime objects to ISO strings
+                if isinstance(record.get('start_time'), datetime):
+                    record['start_time'] = record['start_time'].isoformat()
+                if isinstance(record.get('end_time'), datetime):
+                    record['end_time'] = record['end_time'].isoformat()
+                return record
+            return None
     except Exception as e:
         logging.error(f"Error getting last task: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -336,15 +409,32 @@ async def get_last_task(employee_id: str):
 async def get_employee_history(employee_id: str, days: int = 7):
     """Get employee's work history for the last N days"""
     try:
+        if not database_module.pool:
+            return []
+        
         start_date = datetime.now(timezone.utc) - timedelta(days=days)
-        records = await db.time_records.find(
-            {
-                "employee_id": employee_id,
-                "end_time": {"$gte": start_date.isoformat()}
-            },
-            {"_id": 0}
-        ).sort("end_time", -1).to_list(100)
-        return records
+        
+        async with database_module.pool.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT id, employee_id, employee_name, project_id, project_name, 
+                       task, is_non_productive, start_time, end_time, duration_seconds
+                FROM time_records
+                WHERE employee_id = $1 AND end_time >= $2
+                ORDER BY end_time DESC
+                LIMIT 100
+            """, employee_id, start_date)
+            
+            records = []
+            for row in rows:
+                record = dict(row)
+                # Convert datetime objects to ISO strings
+                if isinstance(record.get('start_time'), datetime):
+                    record['start_time'] = record['start_time'].isoformat()
+                if isinstance(record.get('end_time'), datetime):
+                    record['end_time'] = record['end_time'].isoformat()
+                records.append(record)
+            
+            return records
     except Exception as e:
         logging.error(f"Error getting employee history: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -353,31 +443,54 @@ async def get_employee_history(employee_id: str, days: int = 7):
 async def get_employee_summary(employee_id: str):
     """Get employee's daily summary"""
     try:
+        if not database_module.pool:
+            return {
+                "today": {"total_seconds": 0, "productive_seconds": 0, "non_productive_seconds": 0, "break_seconds": 0, "records": []},
+                "week": {"total_seconds": 0, "productive_seconds": 0, "non_productive_seconds": 0, "break_seconds": 0}
+            }
+        
         today_start = get_today_start()
         week_start = get_week_start()
         
-        # Today's records
-        today_records = await db.time_records.find(
-            {
-                "employee_id": employee_id,
-                "end_time": {"$gte": today_start.isoformat()}
-            },
-            {"_id": 0}
-        ).to_list(100)
-        
-        # Week's records
-        week_records = await db.time_records.find(
-            {
-                "employee_id": employee_id,
-                "end_time": {"$gte": week_start.isoformat()}
-            },
-            {"_id": 0}
-        ).to_list(500)
+        async with database_module.pool.acquire() as conn:
+            # Today's records
+            today_rows = await conn.fetch("""
+                SELECT id, employee_id, employee_name, project_id, project_name, 
+                       task, is_non_productive, start_time, end_time, duration_seconds
+                FROM time_records
+                WHERE employee_id = $1 AND end_time >= $2
+                ORDER BY end_time DESC
+                LIMIT 100
+            """, employee_id, today_start)
+            
+            # Week's records
+            week_rows = await conn.fetch("""
+                SELECT id, employee_id, employee_name, project_id, project_name, 
+                       task, is_non_productive, start_time, end_time, duration_seconds
+                FROM time_records
+                WHERE employee_id = $1 AND end_time >= $2
+                ORDER BY end_time DESC
+                LIMIT 500
+            """, employee_id, week_start)
+            
+            def convert_records(rows):
+                records = []
+                for row in rows:
+                    record = dict(row)
+                    if isinstance(record.get('start_time'), datetime):
+                        record['start_time'] = record['start_time'].isoformat()
+                    if isinstance(record.get('end_time'), datetime):
+                        record['end_time'] = record['end_time'].isoformat()
+                    records.append(record)
+                return records
+            
+            today_records = convert_records(today_rows)
+            week_records = convert_records(week_rows)
         
         def calc_totals(records):
-            productive = sum(r.get('duration_seconds', 0) for r in records if not r.get('is_non_productive') and not r.get('is_break'))
-            non_productive = sum(r.get('duration_seconds', 0) for r in records if r.get('is_non_productive') and not r.get('is_break'))
-            breaks = sum(r.get('duration_seconds', 0) for r in records if r.get('is_break'))
+            productive = sum(r.get('duration_seconds', 0) for r in records if not r.get('is_non_productive'))
+            non_productive = sum(r.get('duration_seconds', 0) for r in records if r.get('is_non_productive'))
+            breaks = 0  # breaks not stored separately in current schema
             return productive, non_productive, breaks
         
         today_prod, today_nonprod, today_breaks = calc_totals(today_records)
@@ -406,51 +519,101 @@ async def get_employee_summary(employee_id: str):
 async def get_admin_dashboard():
     """Get admin dashboard data with all employees stats"""
     try:
+        if not database_module.pool:
+            return {
+                "employees": [],
+                "summary": {"total_employees": 0, "working_now": 0, "on_break": 0, "today_total_seconds": 0, "week_total_seconds": 0},
+                "alerts": [],
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+        
         today_start = get_today_start()
         week_start = get_week_start()
         
-        # Get all active timers
-        active_timers = await db.active_timers.find({}, {"_id": 0}).to_list(1000)
-        active_map = {t['employee_id']: t for t in active_timers}
-        
-        # Get all employees from sheets
+        # Get all employees from Excel
         employees = []
-        if spreadsheet:
+        if excel_client_module.excel_client:
             try:
-                worksheet = spreadsheet.worksheet("Zaměstnanci")
-                records = worksheet.get_all_records()
+                excel_client_module.excel_client.get_or_create_worksheet("Zaměstnanci", ["ID", "Jméno"])
+                records = excel_client_module.excel_client.get_worksheet_data("Zaměstnanci")
                 employees = [{"id": str(r.get('ID', '')), "name": str(r.get('Jméno', ''))} for r in records if r.get('ID')]
-            except:
-                pass
+            except Exception as e:
+                logging.error(f"Error fetching employees for dashboard: {e}")
         
-        # Get today's and week's records for all
-        today_records = await db.time_records.find(
-            {"end_time": {"$gte": today_start.isoformat()}},
-            {"_id": 0}
-        ).to_list(1000)
-        
-        week_records = await db.time_records.find(
-            {"end_time": {"$gte": week_start.isoformat()}},
-            {"_id": 0}
-        ).to_list(5000)
-        
-        # Get last task for each employee
-        last_tasks = {}
-        for emp in employees:
-            last = await db.time_records.find_one(
-                {"employee_id": emp['id'], "is_break": {"$ne": True}},
-                {"_id": 0},
-                sort=[("end_time", -1)]
-            )
-            if last:
-                last_tasks[emp['id']] = last
+        async with database_module.pool.acquire() as conn:
+            # Get all active timers
+            active_rows = await conn.fetch("""
+                SELECT id, employee_id, employee_name, project_id, project_name, 
+                       task, is_non_productive, start_time
+                FROM active_timers
+            """)
+            
+            active_timers = []
+            active_map = {}
+            for row in active_rows:
+                timer = dict(row)
+                if isinstance(timer.get('start_time'), datetime):
+                    timer['start_time'] = timer['start_time'].isoformat()
+                active_timers.append(timer)
+                active_map[timer['employee_id']] = timer
+            
+            # Get today's and week's records for all
+            today_rows = await conn.fetch("""
+                SELECT id, employee_id, employee_name, project_id, project_name, 
+                       task, is_non_productive, start_time, end_time, duration_seconds
+                FROM time_records
+                WHERE end_time >= $1
+                LIMIT 1000
+            """, today_start)
+            
+            week_rows = await conn.fetch("""
+                SELECT id, employee_id, employee_name, project_id, project_name, 
+                       task, is_non_productive, start_time, end_time, duration_seconds
+                FROM time_records
+                WHERE end_time >= $1
+                LIMIT 5000
+            """, week_start)
+            
+            def convert_records(rows):
+                records = []
+                for row in rows:
+                    record = dict(row)
+                    if isinstance(record.get('start_time'), datetime):
+                        record['start_time'] = record['start_time'].isoformat()
+                    if isinstance(record.get('end_time'), datetime):
+                        record['end_time'] = record['end_time'].isoformat()
+                    records.append(record)
+                return records
+            
+            today_records = convert_records(today_rows)
+            week_records = convert_records(week_rows)
+            
+            # Get last task for each employee
+            last_tasks = {}
+            for emp in employees:
+                last_row = await conn.fetchrow("""
+                    SELECT id, employee_id, employee_name, project_id, project_name, 
+                           task, is_non_productive, start_time, end_time, duration_seconds
+                    FROM time_records
+                    WHERE employee_id = $1 AND end_time IS NOT NULL
+                    ORDER BY end_time DESC
+                    LIMIT 1
+                """, emp['id'])
+                
+                if last_row:
+                    last = dict(last_row)
+                    if isinstance(last.get('start_time'), datetime):
+                        last['start_time'] = last['start_time'].isoformat()
+                    if isinstance(last.get('end_time'), datetime):
+                        last['end_time'] = last['end_time'].isoformat()
+                    last_tasks[emp['id']] = last
         
         # Build stats per employee
         employee_stats = []
         for emp in employees:
             emp_id = emp['id']
-            today_emp = [r for r in today_records if r.get('employee_id') == emp_id and not r.get('is_break')]
-            week_emp = [r for r in week_records if r.get('employee_id') == emp_id and not r.get('is_break')]
+            today_emp = [r for r in today_records if r.get('employee_id') == emp_id]
+            week_emp = [r for r in week_records if r.get('employee_id') == emp_id]
             
             today_secs = sum(r.get('duration_seconds', 0) for r in today_emp)
             week_secs = sum(r.get('duration_seconds', 0) for r in week_emp)
@@ -463,7 +626,7 @@ async def get_admin_dashboard():
                 "today_seconds": today_secs,
                 "week_seconds": week_secs,
                 "is_working": active is not None,
-                "is_on_break": active.get('is_break', False) if active else False,
+                "is_on_break": False,  # breaks not tracked separately in current schema
                 "is_non_productive": active.get('is_non_productive', False) if active else False,
                 "current_task": active.get('task') if active else None,
                 "current_project": active.get('project_name') if active else None,
@@ -478,21 +641,29 @@ async def get_admin_dashboard():
         total_today = sum(s['today_seconds'] for s in employee_stats)
         total_week = sum(s['week_seconds'] for s in employee_stats)
         working_count = sum(1 for s in employee_stats if s['is_working'])
-        on_break_count = sum(1 for s in employee_stats if s.get('is_on_break'))
+        on_break_count = 0  # breaks not tracked separately
         
         # Long running alerts (> 4 hours)
         alerts = []
         for timer in active_timers:
-            start = datetime.fromisoformat(timer['start_time'].replace('Z', '+00:00'))
-            elapsed = (datetime.now(timezone.utc) - start).total_seconds()
-            if elapsed > 4 * 3600:  # 4 hours
-                alerts.append({
-                    "type": "long_running",
-                    "employee_name": timer['employee_name'],
-                    "task": timer.get('task'),
-                    "hours": round(elapsed / 3600, 1),
-                    "message": f"{timer['employee_name']} pracuje už {round(elapsed/3600, 1)} hodin"
-                })
+            start_str = timer.get('start_time', '')
+            if start_str:
+                try:
+                    if isinstance(start_str, str):
+                        start = datetime.fromisoformat(start_str.replace('Z', '+00:00'))
+                    else:
+                        start = start_str
+                    elapsed = (datetime.now(timezone.utc) - start).total_seconds()
+                    if elapsed > 4 * 3600:  # 4 hours
+                        alerts.append({
+                            "type": "long_running",
+                            "employee_name": timer['employee_name'],
+                            "task": timer.get('task'),
+                            "hours": round(elapsed / 3600, 1),
+                            "message": f"{timer['employee_name']} pracuje už {round(elapsed/3600, 1)} hodin"
+                        })
+                except Exception as e:
+                    logging.debug(f"Error calculating elapsed time for alert: {e}")
         
         return {
             "employees": employee_stats,
@@ -519,6 +690,32 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Serve React frontend static files
+frontend_build_dir = PROJECT_ROOT / "frontend" / "build"
+if frontend_build_dir.exists():
+    # Serve static files (JS, CSS, images, etc.)
+    app.mount("/static", StaticFiles(directory=str(frontend_build_dir / "static")), name="static")
+    
+    # Serve React app for all non-API routes
+    @app.get("/{full_path:path}")
+    async def serve_react_app(full_path: str):
+        """Serve React app for all non-API routes"""
+        # Don't serve API routes
+        if full_path.startswith("api"):
+            raise HTTPException(status_code=404, detail="Not found")
+        
+        # Serve index.html for React Router
+        index_file = frontend_build_dir / "index.html"
+        if index_file.exists():
+            return FileResponse(str(index_file))
+        else:
+            raise HTTPException(status_code=404, detail="Frontend not built")
+    
+    logging.info(f"Serving React frontend from: {frontend_build_dir}")
+else:
+    logging.warning(f"Frontend build directory not found: {frontend_build_dir}")
+    logging.warning("Run 'npm run build' in frontend directory to build React app")
 
 # Configure logging
 logging.basicConfig(
