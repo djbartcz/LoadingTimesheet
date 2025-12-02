@@ -1,19 +1,21 @@
 from fastapi import FastAPI, APIRouter, HTTPException
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
-from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import logging
 from pathlib import Path
 from pydantic import BaseModel, Field, ConfigDict
 from typing import List, Optional
 import uuid
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 import gspread
 from google.oauth2.service_account import Credentials
 import json
 
 ROOT_DIR = Path(__file__).parent
+PROJECT_ROOT = ROOT_DIR.parent
 load_dotenv(ROOT_DIR / '.env')
 
 # MongoDB connection
@@ -27,6 +29,7 @@ SCOPES = [
     'https://www.googleapis.com/auth/drive'
 ]
 
+# Load credentials from environment
 google_creds_json = os.environ.get('GOOGLE_SERVICE_ACCOUNT_JSON', '')
 SPREADSHEET_ID = os.environ.get('GOOGLE_SPREADSHEET_ID', '')
 
@@ -93,26 +96,9 @@ class StopTimerRequest(BaseModel):
     end_time: str
     duration_seconds: int
 
-class DailySummary(BaseModel):
-    date: str
-    total_seconds: int
-    productive_seconds: int
-    non_productive_seconds: int
-    break_seconds: int
-    records: List[dict]
-
-class EmployeeStats(BaseModel):
-    employee_id: str
-    employee_name: str
-    today_seconds: int
-    week_seconds: int
-    is_working: bool
-    current_task: Optional[str] = None
-    current_project: Optional[str] = None
-    last_task: Optional[dict] = None
-
 # Helper functions
 def get_or_create_worksheet(name: str, headers: List[str]):
+    """Get or create a worksheet with headers"""
     try:
         worksheet = spreadsheet.worksheet(name)
     except gspread.WorksheetNotFound:
@@ -135,11 +121,13 @@ async def root():
 
 @api_router.get("/employees", response_model=List[Employee])
 async def get_employees():
+    """Get all employees from Google Sheets"""
     if not spreadsheet:
         raise HTTPException(status_code=500, detail="Google Sheets not configured")
+    
     try:
-        worksheet = get_or_create_worksheet("Zaměstnanci", ["ID", "Jméno"])
-        records = worksheet.get_all_records()
+        excel_client_module.excel_client.get_or_create_worksheet("Zaměstnanci", ["ID", "Jméno"])
+        records = excel_client_module.excel_client.get_worksheet_data("Zaměstnanci")
         employees = [Employee(id=str(r.get('ID', '')), name=str(r.get('Jméno', ''))) for r in records if r.get('ID') and r.get('Jméno')]
         return employees
     except Exception as e:
@@ -148,11 +136,13 @@ async def get_employees():
 
 @api_router.get("/projects", response_model=List[Project])
 async def get_projects():
+    """Get all projects from Google Sheets"""
     if not spreadsheet:
         raise HTTPException(status_code=500, detail="Google Sheets not configured")
+    
     try:
-        worksheet = get_or_create_worksheet("Projekty", ["ID", "Název"])
-        records = worksheet.get_all_records()
+        excel_client_module.excel_client.get_or_create_worksheet("Projekty", ["ID", "Název"])
+        records = excel_client_module.excel_client.get_worksheet_data("Projekty")
         projects = [Project(id=str(r.get('ID', '')), name=str(r.get('Název', ''))) for r in records if r.get('ID') and r.get('Název')]
         return projects
     except Exception as e:
@@ -161,15 +151,19 @@ async def get_projects():
 
 @api_router.get("/tasks", response_model=List[Task])
 async def get_tasks():
+    """Get all tasks from Google Sheets"""
     if not spreadsheet:
         raise HTTPException(status_code=500, detail="Google Sheets not configured")
+    
     try:
         worksheet = get_or_create_worksheet("Úkony", ["Název"])
         records = worksheet.get_all_records()
+        
+        # If empty, add default tasks
         if not records:
             default_tasks = ["NAKLÁDKA", "VYKLÁDKA", "VYCHYSTÁVÁNÍ", "BALENÍ", "MANIPULACE"]
             for task in default_tasks:
-                worksheet.append_row([task])
+                excel_client_module.excel_client.append_row("Úkony", [task])
             tasks = [Task(name=t) for t in default_tasks]
         else:
             tasks = [Task(name=str(r.get('Název', ''))) for r in records if r.get('Název')]
@@ -180,15 +174,19 @@ async def get_tasks():
 
 @api_router.get("/non-productive-tasks", response_model=List[NonProductiveTask])
 async def get_non_productive_tasks():
+    """Get all non-productive tasks from Google Sheets"""
     if not spreadsheet:
         raise HTTPException(status_code=500, detail="Google Sheets not configured")
+    
     try:
         worksheet = get_or_create_worksheet("Neproduktivní úkony", ["Název"])
         records = worksheet.get_all_records()
+        
+        # If empty, add default non-productive tasks
         if not records:
             default_tasks = ["ÚKLID", "ŠROT", "MANIPULACE", "PŘEVÁŽENÍ"]
             for task in default_tasks:
-                worksheet.append_row([task])
+                excel_client_module.excel_client.append_row("Neproduktivní úkony", [task])
             tasks = [NonProductiveTask(name=t) for t in default_tasks]
         else:
             tasks = [NonProductiveTask(name=str(r.get('Název', ''))) for r in records if r.get('Název')]
@@ -199,7 +197,11 @@ async def get_non_productive_tasks():
 
 @api_router.post("/timer/start", response_model=TimeRecord)
 async def start_timer(request: StartTimerRequest):
+    """Start a new timer - stores in MongoDB for real-time tracking"""
     try:
+        if not database_module.pool:
+            raise HTTPException(status_code=500, detail="Database not configured")
+        
         record = TimeRecord(
             employee_id=request.employee_id,
             employee_name=request.employee_name,
@@ -210,8 +212,10 @@ async def start_timer(request: StartTimerRequest):
             is_break=request.is_break,
             start_time=datetime.now(timezone.utc).isoformat()
         )
+        
         doc = record.model_dump()
         await db.active_timers.insert_one(doc)
+        
         return record
     except Exception as e:
         logging.error(f"Error starting timer: {e}")
@@ -219,11 +223,14 @@ async def start_timer(request: StartTimerRequest):
 
 @api_router.post("/timer/stop")
 async def stop_timer(request: StopTimerRequest):
+    """Stop a timer and save to Google Sheets"""
     try:
+        # Get the active timer from MongoDB
         timer = await db.active_timers.find_one({"id": request.record_id})
         if not timer:
             raise HTTPException(status_code=404, detail="Timer not found")
         
+        # Update timer with end time
         timer['end_time'] = request.end_time
         timer['duration_seconds'] = request.duration_seconds
         
@@ -232,31 +239,18 @@ async def stop_timer(request: StopTimerRequest):
         seconds = request.duration_seconds % 60
         duration_formatted = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
         
+        # Parse times for Google Sheets
         start_dt = datetime.fromisoformat(timer['start_time'].replace('Z', '+00:00'))
         end_dt = datetime.fromisoformat(request.end_time.replace('Z', '+00:00'))
         
+        # Save to Google Sheets - different sheet based on type
         if spreadsheet:
             is_non_productive = timer.get('is_non_productive', False)
-            is_break = timer.get('is_break', False)
             
-            if is_break:
-                worksheet = get_or_create_worksheet("Přestávky", [
-                    "Datum", "Zaměstnanec ID", "Zaměstnanec", "Typ",
-                    "Začátek", "Konec", "Doba trvání", "Doba (sekundy)"
-                ])
-                row = [
-                    start_dt.strftime("%Y-%m-%d"),
-                    timer['employee_id'],
-                    timer['employee_name'],
-                    timer['task'],
-                    start_dt.strftime("%H:%M:%S"),
-                    end_dt.strftime("%H:%M:%S"),
-                    duration_formatted,
-                    request.duration_seconds
-                ]
-            elif is_non_productive:
+            if is_non_productive:
+                # Save to non-productive records sheet
                 worksheet = get_or_create_worksheet("Neproduktivní záznamy", [
-                    "Datum", "Zaměstnanec ID", "Zaměstnanec", "Úkon",
+                    "Datum", "Zaměstnanec ID", "Zaměstnanec", "Úkon", 
                     "Začátek", "Konec", "Doba trvání", "Doba (sekundy)"
                 ])
                 row = [
@@ -269,9 +263,11 @@ async def stop_timer(request: StopTimerRequest):
                     duration_formatted,
                     request.duration_seconds
                 ]
+                excel_client_module.excel_client.append_row("Neproduktivní záznamy", row)
             else:
+                # Save to productive records sheet
                 worksheet = get_or_create_worksheet("Záznamy", [
-                    "Datum", "Zaměstnanec ID", "Zaměstnanec", "Projekt ID", "Projekt",
+                    "Datum", "Zaměstnanec ID", "Zaměstnanec", "Projekt ID", "Projekt", 
                     "Úkon", "Začátek", "Konec", "Doba trvání", "Doba (sekundy)"
                 ])
                 row = [
@@ -286,12 +282,16 @@ async def stop_timer(request: StopTimerRequest):
                     duration_formatted,
                     request.duration_seconds
                 ]
+            
             worksheet.append_row(row)
         
+        # Remove from active timers
         await db.active_timers.delete_one({"id": request.record_id})
+        
+        # Also save to MongoDB for history
         await db.time_records.insert_one(timer)
         
-        return {"success": True, "message": "Timer stopped and saved to Google Sheets"}
+        return {"success": True, "message": "Timer stopped and saved to Excel file"}
     except HTTPException:
         raise
     except Exception as e:
@@ -302,7 +302,9 @@ async def stop_timer(request: StopTimerRequest):
 async def get_active_timer(employee_id: str):
     try:
         timer = await db.active_timers.find_one({"employee_id": employee_id}, {"_id": 0})
-        return timer
+        if timer:
+            return timer
+        return None
     except Exception as e:
         logging.error(f"Error getting active timer: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -518,12 +520,32 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
 
+@app.on_event("startup")
+async def startup_event():
+    """Initialize database on startup"""
+    try:
+        result = await init_db()
+        if result:
+            logging.info("Database initialized successfully")
+        else:
+            logging.warning("Database initialization returned None - PostgreSQL features disabled")
+    except Exception as e:
+        logging.error(f"Failed to initialize database on startup: {e}", exc_info=True)
+
 @app.on_event("shutdown")
-async def shutdown_db_client():
-    client.close()
+async def shutdown_event():
+    """Close database connections on shutdown"""
+    await close_db()
+
+# Main entry point for running the server
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.environ.get('PORT', 8000))
+    uvicorn.run(app, host="0.0.0.0", port=port)

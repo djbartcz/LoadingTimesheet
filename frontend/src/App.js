@@ -12,7 +12,8 @@ import {
   BarChart3, Users, History, Repeat, Bell, TrendingUp, Pause
 } from "lucide-react";
 
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
+// Use relative URL when served from same server, or env variable if set
+const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || window.location.origin;
 const API = `${BACKEND_URL}/api`;
 
 // Storage Keys
