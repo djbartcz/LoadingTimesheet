@@ -13,8 +13,29 @@ import {
 } from "lucide-react";
 
 // Use relative URL when served from same server, or env variable if set
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || window.location.origin;
+// For dev server (port 3000): if accessed remotely, backend should be on same IP but port 8000
+let BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
+if (!BACKEND_URL) {
+    // If dev server (port 3000), use same hostname but port 8000 for backend
+    if (window.location.port === '3000' || window.location.port === '') {
+        // Always use the hostname from the URL (works for localhost and remote IP)
+        const hostname = window.location.hostname;
+        BACKEND_URL = `${window.location.protocol}//${hostname}:8000`;
+    } else {
+        // Production: frontend and backend served from same origin
+        BACKEND_URL = window.location.origin;
+    }
+}
 const API = `${BACKEND_URL}/api`;
+
+// Debug: Log backend URL (remove in production)
+console.log('=== Backend Configuration ===');
+console.log('Frontend URL:', window.location.href);
+console.log('Frontend hostname:', window.location.hostname);
+console.log('Frontend port:', window.location.port);
+console.log('Backend URL:', BACKEND_URL);
+console.log('API Base URL:', API);
+console.log('===========================');
 
 // Storage Keys
 const STORAGE_KEYS = {
@@ -127,17 +148,25 @@ const EmployeeSelection = () => {
   useEffect(() => {
     const fetchData = async () => {
       try {
+        console.log('Fetching employees from:', `${API}/employees`);
         const [empRes, timersRes] = await Promise.all([
           axios.get(`${API}/employees`, { timeout: 10000 }),
           axios.get(`${API}/timers/active`, { timeout: 10000 }).catch(() => ({ data: [] }))
         ]);
+        console.log('✅ Employees fetched successfully:', empRes.data.length, 'employees');
         const sorted = empRes.data.sort((a, b) => a.name.localeCompare(b.name, 'cs'));
         setEmployees(sorted);
         setActiveTimers(timersRes.data || []);
         localStorage.setItem('cached_employees', JSON.stringify(sorted));
       } catch (e) {
+        console.error('❌ Error fetching employees:', e);
+        console.error('API URL was:', `${API}/employees`);
+        console.error('Error details:', e.message, e.response?.status, e.response?.data);
         const cached = localStorage.getItem('cached_employees');
-        if (cached) setEmployees(JSON.parse(cached));
+        if (cached) {
+          console.log('Using cached employees');
+          setEmployees(JSON.parse(cached));
+        }
       } finally { setLoading(false); }
     };
     fetchData();

@@ -1,0 +1,38 @@
+# Django Timesheet Application Environment Variables
+# Copy this file to .env and update with your actual values
+
+# PostgreSQL Database Configuration
+DB_NAME=timesheet_db
+DB_USER=postgres
+DB_PASSWORD=postgres
+DB_HOST=localhost
+DB_PORT=5432
+
+# Excel File Configuration
+# Use the FULL absolute path to your Excel file
+# For SharePoint files: Sync the folder via OneDrive and use the local path
+# Example: C:\Users\YourName\OneDrive - CompanyName\sites\SiteName\...\file.xlsx
+EXCEL_FILE_PATH=C:\Users\admsoc\Desktop\LoadingTimesheet\django_app\TimesheetSystem.xlsx
+
+# Admin Login Credentials
+# Set these to secure values in production!
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=admin
+
+# CSRF Trusted Origins (required for HTTPS)
+# Comma-separated list of trusted origins for CSRF protection
+# Example: CSRF_TRUSTED_ORIGINS=https://mts.astron.biz,https://example.com
+CSRF_TRUSTED_ORIGINS=https://mts.astron.biz
+
+# Session Configuration (optional)
+# SESSION_COOKIE_AGE=1209600  # Session expires after inactivity (seconds). Default: 2 weeks (1209600)
+# SESSION_EXPIRE_AT_BROWSER_CLOSE=False  # Expire when browser closes. Default: False
+# SESSION_SAVE_EVERY_REQUEST=False  # Extend session on every request. Default: False
+
+# Timezone Configuration
+# TIME_ZONE=Europe/Prague  # Django timezone (default: Europe/Prague)
+# EXCEL_TIMEZONE=system  # Timezone for Excel exports: 'system' (uses system local time) or timezone name like 'Europe/Prague' (default: system)
+
+# Optional: Django Secret Key (for production)
+# SECRET_KEY=your-secret-key-here
+

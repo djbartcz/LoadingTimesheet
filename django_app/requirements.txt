@@ -1,0 +1,7 @@
+Django>=5.2.8
+psycopg2-binary>=2.9.11
+openpyxl>=3.1.5
+python-dotenv>=1.2.1
+requests>=2.31.0
+pytz>=2024.1
+

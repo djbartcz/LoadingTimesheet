@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="min-h-screen flex items-center justify-center p-5 bg-gradient-to-br from-sky-50 to-blue-50">
+    <div class="bg-white p-10 rounded-2xl shadow-xl text-center max-w-sm w-full">
+        <svg class="w-10 h-10 text-accent-primary mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
+        </svg>
+        <h2 class="font-grotesk text-2xl mb-2">Admin přehled</h2>
+        <p class="text-slate-600 text-sm mb-6">Zadejte přihlašovací údaje</p>
+        <form method="post">
+            {% csrf_token %}
+            <input type="text" name="username" placeholder="Uživatelské jméno" class="w-full px-4 py-3.5 text-base border-2 border-slate-200 rounded-lg outline-none focus:border-accent-primary transition-all mb-3" autofocus>
+            <input type="password" name="password" placeholder="Heslo" class="w-full px-4 py-3.5 text-base border-2 border-slate-200 rounded-lg outline-none focus:border-accent-primary transition-all">
+            {% if error %}
+            <div class="text-accent-danger text-xs mt-2">{{ error }}</div>
+            {% endif %}
+            <button type="submit" class="w-full px-4 py-3.5 mt-4 bg-accent-primary text-white rounded-lg text-base font-semibold hover:bg-accent-secondary transition-all">
+                Přihlásit
+            </button>
+        </form>
+        <a href="{% url 'employee_selection' %}" class="block mt-5 text-slate-400 text-sm hover:text-accent-primary transition-colors">
+            ← Zpět na výběr
+        </a>
+    </div>
+</div>
+{% endblock %}
+

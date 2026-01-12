@@ -15,11 +15,22 @@ class ExcelClient:
         self.file_path = Path(file_path)
         self.workbook = None
         
-    def _load_workbook(self):
-        """Load workbook, create if doesn't exist"""
+    def _load_workbook(self, force_reload=True):
+        """Load workbook, create if doesn't exist - always reloads fresh data"""
         try:
+            # Close existing workbook if open to ensure fresh reload
+            if self.workbook is not None and force_reload:
+                try:
+                    self.workbook.close()
+                except:
+                    pass
+                self.workbook = None
+            
             if self.file_path.exists():
+                # Always reload from disk to get latest changes from Excel file
+                # This ensures any external edits are immediately visible
                 self.workbook = load_workbook(self.file_path)
+                logging.debug(f"Reloaded workbook from: {self.file_path}")
             else:
                 # Create new workbook if it doesn't exist
                 self.workbook = Workbook()
@@ -41,7 +52,8 @@ class ExcelClient:
     
     def get_or_create_worksheet(self, worksheet_name: str, headers: List[str]):
         """Get or create worksheet with headers - reloads workbook first"""
-        # Reload workbook to ensure we have latest data
+        # Force reload workbook to ensure we have latest data
+        # This ensures any external changes are immediately visible
         self._load_workbook()
         
         if worksheet_name not in self.workbook.sheetnames:
@@ -54,7 +66,8 @@ class ExcelClient:
     
     def get_worksheet_data(self, worksheet_name: str) -> List[Dict]:
         """Read all data from worksheet - reloads workbook each time for live data"""
-        # Always reload workbook to get latest data from Excel file
+        # Force reload workbook to get latest data from Excel file
+        # This ensures any external changes to the Excel file are immediately visible
         self._load_workbook()
         
         if worksheet_name not in self.workbook.sheetnames:

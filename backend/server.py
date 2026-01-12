@@ -683,19 +683,22 @@ async def get_admin_dashboard():
 
 app.include_router(api_router)
 
+# CORS configuration - allow all origins by default for remote access
+# Force allow all origins regardless of .env setting for development
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
+    allow_origin_regex=r".*",  # Allow all origins using regex
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 # Serve React frontend static files
 frontend_build_dir = PROJECT_ROOT / "frontend" / "build"
-if frontend_build_dir.exists():
+static_dir = frontend_build_dir / "static"
+if frontend_build_dir.exists() and static_dir.exists():
     # Serve static files (JS, CSS, images, etc.)
-    app.mount("/static", StaticFiles(directory=str(frontend_build_dir / "static")), name="static")
+    app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
     
     # Serve React app for all non-API routes
     @app.get("/{full_path:path}")
@@ -714,8 +717,9 @@ if frontend_build_dir.exists():
     
     logging.info(f"Serving React frontend from: {frontend_build_dir}")
 else:
-    logging.warning(f"Frontend build directory not found: {frontend_build_dir}")
+    logging.warning(f"Frontend build directory or static folder not found: {frontend_build_dir}")
     logging.warning("Run 'npm run build' in frontend directory to build React app")
+    logging.info("API will still be available at /api endpoints")
 
 # Configure logging
 logging.basicConfig(
