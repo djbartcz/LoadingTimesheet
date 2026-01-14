@@ -47,3 +47,51 @@ class TimeRecord(models.Model):
             models.Index(fields=['start_time']),
         ]
         ordering = ['-end_time']
+
+
+class Employee(models.Model):
+    """Employee master data"""
+    id = models.CharField(max_length=255, primary_key=True)
+    name = models.CharField(max_length=255)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        db_table = 'employees'
+        ordering = ['name']
+    
+    def __str__(self):
+        return f"{self.id} - {self.name}"
+
+
+class Project(models.Model):
+    """Project/Job number master data"""
+    id = models.CharField(max_length=255, primary_key=True)
+    name = models.CharField(max_length=255)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        db_table = 'projects'
+        ordering = ['name']
+    
+    def __str__(self):
+        return f"{self.id} - {self.name}"
+
+
+class Task(models.Model):
+    """Task master data"""
+    name = models.CharField(max_length=255, primary_key=True)
+    is_non_productive = models.BooleanField(default=False)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        db_table = 'tasks'
+        ordering = ['name']
+    
+    def __str__(self):
+        return self.name

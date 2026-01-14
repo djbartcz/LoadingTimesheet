@@ -15,11 +15,24 @@
             </svg>
             Admin přehled
         </h1>
-        <a href="{% url 'admin_dashboard' %}" class="bg-white border border-slate-200 rounded-lg p-2.5 hover:bg-slate-50 transition-colors">
-            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
-            </svg>
-        </a>
+        <div class="flex items-center gap-2">
+            <a href="{% url 'admin_control_panel' %}" class="bg-white border border-slate-200 rounded-lg p-2.5 hover:bg-slate-50 transition-colors" title="Správa dat">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                </svg>
+            </a>
+            <a href="{% url 'edit_time_records' %}" class="bg-white border border-slate-200 rounded-lg p-2.5 hover:bg-slate-50 transition-colors" title="Editovat záznamy">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path>
+                </svg>
+            </a>
+            <a href="{% url 'admin_dashboard' %}" class="bg-white border border-slate-200 rounded-lg p-2.5 hover:bg-slate-50 transition-colors" title="Obnovit">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                </svg>
+            </a>
+        </div>
     </div>
 
     <!-- Alerts -->
@@ -61,15 +74,15 @@
         </div>
     </div>
 
-    <!-- Sync Button -->
+    <!-- Export Button -->
     <div class="mb-5">
-        <button id="syncButton" onclick="syncToExcel()" class="w-full flex items-center justify-center gap-2 px-4 py-3 bg-accent-primary text-white rounded-xl font-semibold hover:bg-opacity-90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
-            <svg id="syncIcon" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+        <button id="exportButton" onclick="exportToExcel()" class="w-full flex items-center justify-center gap-2 px-4 py-3 bg-accent-primary text-white rounded-xl font-semibold hover:bg-opacity-90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+            <svg id="exportIcon" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
             </svg>
-            <span id="syncText">Synchronizovat data do Excel</span>
+            <span id="exportText">Exportovat do Excel</span>
         </button>
-        <div id="syncMessage" class="mt-2 text-sm text-center hidden"></div>
+        <div id="exportMessage" class="mt-2 text-sm text-center hidden"></div>
     </div>
 
     <!-- Employee List -->
@@ -114,49 +127,67 @@
 </div>
 
 <script>
-function syncToExcel() {
-    const button = document.getElementById('syncButton');
-    const icon = document.getElementById('syncIcon');
-    const text = document.getElementById('syncText');
-    const message = document.getElementById('syncMessage');
+function exportToExcel() {
+    const button = document.getElementById('exportButton');
+    const icon = document.getElementById('exportIcon');
+    const text = document.getElementById('exportText');
+    const message = document.getElementById('exportMessage');
     
     // Disable button and show loading state
     button.disabled = true;
-    text.textContent = 'Synchronizuji...';
+    text.textContent = 'Exportuji...';
     message.classList.add('hidden');
     
     // Add spinning animation to icon
     icon.classList.add('animate-spin');
     
-    fetch('{% url "sync_to_excel" %}', {
-        method: 'POST',
-        headers: {
-            'X-CSRFToken': getCSRFToken(),
-            'Content-Type': 'application/json',
-        },
+    // Fetch the file and trigger download
+    fetch('{% url "export_to_excel" %}', {
+        method: 'GET',
         credentials: 'same-origin',
     })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            message.textContent = data.message || 'Synchronizace úspěšná!';
-            message.className = 'mt-2 text-sm text-center text-green-600 font-medium';
-            message.classList.remove('hidden');
-        } else {
-            message.textContent = data.error || 'Chyba při synchronizaci';
-            message.className = 'mt-2 text-sm text-center text-red-600 font-medium';
-            message.classList.remove('hidden');
+    .then(response => {
+        if (!response.ok) {
+            throw new Error('Export failed');
         }
+        // Get filename from Content-Disposition header
+        const contentDisposition = response.headers.get('Content-Disposition');
+        let filename = 'TimeSheet.xlsx';
+        if (contentDisposition) {
+            const filenameMatch = contentDisposition.match(/filename="(.+)"/);
+            if (filenameMatch) {
+                filename = filenameMatch[1];
+            }
+        }
+        
+        return response.blob().then(blob => ({ blob, filename }));
+    })
+    .then(({ blob, filename }) => {
+        // Create download link
+        const url = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = filename;
+        
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        window.URL.revokeObjectURL(url);
+        
+        // Show success message
+        message.textContent = 'Export dokončen! Soubor se stahuje...';
+        message.className = 'mt-2 text-sm text-center text-green-600 font-medium';
+        message.classList.remove('hidden');
     })
     .catch(error => {
-        message.textContent = 'Chyba při synchronizaci: ' + error.message;
+        message.textContent = 'Chyba při exportu: ' + error.message;
         message.className = 'mt-2 text-sm text-center text-red-600 font-medium';
         message.classList.remove('hidden');
     })
     .finally(() => {
         // Re-enable button
         button.disabled = false;
-        text.textContent = 'Synchronizovat data do Excel';
+        text.textContent = 'Exportovat do Excel';
         icon.classList.remove('animate-spin');
         
         // Hide message after 5 seconds

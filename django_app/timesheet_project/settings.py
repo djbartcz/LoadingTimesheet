@@ -160,6 +160,9 @@ USE_I18N = True
 
 USE_TZ = True
 
+# Default charset for responses
+DEFAULT_CHARSET = 'utf-8'
+
 # Excel timezone - timezone to use when saving timestamps to Excel
 # Set to 'system' to use system local time, or a timezone name like 'Europe/Prague'
 # Defaults to TIME_ZONE if not set

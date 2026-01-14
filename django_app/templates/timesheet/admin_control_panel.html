@@ -1,0 +1,340 @@
+{% extends "base.html" %}
+{% load timesheet_tags %}
+
+{% block extra_head %}
+<meta name="csrf-token" content="{{ csrf_token }}">
+{% endblock %}
+
+{% block content %}
+<div class="min-h-screen px-4 py-6 max-w-7xl mx-auto">
+    <!-- Header -->
+    <div class="flex items-center gap-3 mb-6">
+        <a href="{% url 'admin_dashboard' %}" class="text-accent-primary text-base font-medium hover:text-accent-secondary transition-colors flex items-center gap-1">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
+            </svg>
+            Back
+        </a>
+        <h1 class="flex-1 flex items-center gap-3 font-grotesk text-2xl font-bold text-slate-900">
+            <div class="p-2 bg-accent-primary/10 rounded-lg">
+                <svg class="w-6 h-6 text-accent-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                </svg>
+            </div>
+            Administration - Data Management
+        </h1>
+    </div>
+
+    <!-- Info Box -->
+    <div class="mb-6 p-5 bg-gradient-to-r from-blue-50 via-indigo-50 to-purple-50 border-l-4 border-accent-primary rounded-xl shadow-sm">
+        <div class="flex items-start gap-3">
+            <div class="p-2 bg-accent-primary/10 rounded-lg flex-shrink-0">
+                <svg class="w-5 h-5 text-accent-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                </svg>
+            </div>
+            <div class="flex-1">
+                <p class="font-bold text-slate-800 mb-3 text-base">Input Data Format:</p>
+                <ul class="text-sm text-slate-700 space-y-2">
+                    <li class="flex items-start gap-2.5">
+                        <span class="text-accent-primary mt-1 font-bold">•</span>
+                        <span><strong class="text-slate-800">Employees and Projects:</strong> ID [TAB] Name (each line = one record)</span>
+                    </li>
+                    <li class="flex items-start gap-2.5">
+                        <span class="text-accent-primary mt-1 font-bold">•</span>
+                        <span><strong class="text-slate-800">Tasks:</strong> Task name (each line = one task)</span>
+                    </li>
+                    <li class="flex items-start gap-2.5">
+                        <span class="text-accent-primary mt-1 font-bold">•</span>
+                        <span>Removing a record from "New values" will deactivate it (won't show in app), but it stays in the database</span>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <form id="masterDataForm" class="space-y-6">
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <!-- Employees Section -->
+            <div class="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm hover:shadow-lg hover:border-blue-200 transition-all duration-200">
+                <div class="flex items-center justify-between mb-4 pb-3 border-b border-slate-200">
+                    <div class="flex items-center gap-2">
+                        <div class="p-2 bg-blue-100 rounded-lg">
+                            <svg class="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path>
+                            </svg>
+                        </div>
+                        <h2 class="text-lg font-bold text-slate-800">Employees</h2>
+                    </div>
+                    <span class="px-3 py-1 bg-blue-100 text-blue-700 text-xs font-semibold rounded-full">Active: {{ employees_count }}</span>
+                </div>
+                
+                <div class="mb-4">
+                    <label class="block text-xs font-semibold text-slate-700 mb-2 uppercase tracking-wide">Current Values</label>
+                    <div class="p-4 bg-gradient-to-br from-slate-50 to-slate-100 border-2 border-slate-200 rounded-xl font-mono text-sm text-slate-700 max-h-48 overflow-y-auto shadow-inner">
+                        {% if employees_text %}
+                            <pre class="whitespace-pre-wrap m-0">{{ employees_text }}</pre>
+                        {% else %}
+                            <span class="text-slate-400 italic">No employees</span>
+                        {% endif %}
+                    </div>
+                </div>
+                
+                <div>
+                    <label class="block text-xs font-semibold text-slate-700 mb-2 uppercase tracking-wide">New Values</label>
+                    <textarea 
+                        id="employees" 
+                        name="employees" 
+                        rows="7" 
+                        class="w-full p-4 border-2 border-slate-300 rounded-xl font-mono text-sm focus:ring-2 focus:ring-accent-primary focus:border-accent-primary transition-all resize-none shadow-sm"
+                        placeholder="ID&#9;Name&#10;E001&#9;John Doe&#10;E002&#9;Jane Smith">{{ employees_text }}</textarea>
+                    <p class="mt-2 text-xs text-slate-500 flex items-center gap-1">
+                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                        </svg>
+                        Format: ID [TAB] Name
+                    </p>
+                </div>
+            </div>
+
+            <!-- Projects Section -->
+            <div class="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm hover:shadow-md transition-shadow">
+                <div class="flex items-center justify-between mb-4 pb-3 border-b border-slate-200">
+                    <div class="flex items-center gap-2">
+                        <div class="p-2 bg-purple-100 rounded-lg">
+                            <svg class="w-5 h-5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                            </svg>
+                        </div>
+                        <h2 class="text-lg font-bold text-slate-800">Projects / Job Numbers</h2>
+                    </div>
+                    <span class="px-3 py-1 bg-purple-100 text-purple-700 text-xs font-semibold rounded-full">Active: {{ projects_count }}</span>
+                </div>
+                
+                <div class="mb-4">
+                    <label class="block text-xs font-semibold text-slate-700 mb-2 uppercase tracking-wide">Current Values</label>
+                    <div class="p-4 bg-gradient-to-br from-slate-50 to-slate-100 border-2 border-slate-200 rounded-xl font-mono text-sm text-slate-700 max-h-48 overflow-y-auto shadow-inner">
+                        {% if projects_text %}
+                            <pre class="whitespace-pre-wrap m-0">{{ projects_text }}</pre>
+                        {% else %}
+                            <span class="text-slate-400 italic">No projects</span>
+                        {% endif %}
+                    </div>
+                </div>
+                
+                <div>
+                    <label class="block text-xs font-semibold text-slate-700 mb-2 uppercase tracking-wide">New Values</label>
+                    <textarea 
+                        id="projects" 
+                        name="projects" 
+                        rows="7" 
+                        class="w-full p-4 border-2 border-slate-300 rounded-xl font-mono text-sm focus:ring-2 focus:ring-accent-primary focus:border-accent-primary transition-all resize-none shadow-sm"
+                        placeholder="ID&#9;Project Name&#10;P001&#9;Project Alpha&#10;P002&#9;Project Beta">{{ projects_text }}</textarea>
+                    <p class="mt-2 text-xs text-slate-500 flex items-center gap-1">
+                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                        </svg>
+                        Format: ID [TAB] Name
+                    </p>
+                </div>
+            </div>
+
+            <!-- Productive Tasks Section -->
+            <div class="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm hover:shadow-lg hover:border-green-200 transition-all duration-200">
+                <div class="flex items-center justify-between mb-4 pb-3 border-b border-slate-200">
+                    <div class="flex items-center gap-2">
+                        <div class="p-2 bg-green-100 rounded-lg">
+                            <svg class="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                            </svg>
+                        </div>
+                        <h2 class="text-lg font-bold text-slate-800">Productive Tasks</h2>
+                    </div>
+                    <span class="px-3 py-1 bg-green-100 text-green-700 text-xs font-semibold rounded-full">Active: {{ productive_tasks_count }}</span>
+                </div>
+                
+                <div class="mb-4">
+                    <label class="block text-xs font-semibold text-slate-700 mb-2 uppercase tracking-wide">Current Values</label>
+                    <div class="p-4 bg-gradient-to-br from-slate-50 to-slate-100 border-2 border-slate-200 rounded-xl font-mono text-sm text-slate-700 max-h-48 overflow-y-auto shadow-inner">
+                        {% if productive_tasks_text %}
+                            <pre class="whitespace-pre-wrap m-0">{{ productive_tasks_text }}</pre>
+                        {% else %}
+                            <span class="text-slate-400 italic">No tasks</span>
+                        {% endif %}
+                    </div>
+                </div>
+                
+                <div>
+                    <label class="block text-xs font-semibold text-slate-700 mb-2 uppercase tracking-wide">New Values</label>
+                    <textarea 
+                        id="productive_tasks" 
+                        name="productive_tasks" 
+                        rows="7" 
+                        class="w-full p-4 border-2 border-slate-300 rounded-xl font-mono text-sm focus:ring-2 focus:ring-accent-primary focus:border-accent-primary transition-all resize-none shadow-sm"
+                        placeholder="LOADING&#10;UNLOADING&#10;PICKING&#10;PACKING&#10;HANDLING">{{ productive_tasks_text }}</textarea>
+                    <p class="mt-2 text-xs text-slate-500 flex items-center gap-1">
+                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                        </svg>
+                        Format: Task name (one per line)
+                    </p>
+                </div>
+            </div>
+
+            <!-- Non-Productive Tasks Section -->
+            <div class="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm hover:shadow-lg hover:border-orange-200 transition-all duration-200">
+                <div class="flex items-center justify-between mb-4 pb-3 border-b border-slate-200">
+                    <div class="flex items-center gap-2">
+                        <div class="p-2 bg-orange-100 rounded-lg">
+                            <svg class="w-5 h-5 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                            </svg>
+                        </div>
+                        <h2 class="text-lg font-bold text-slate-800">Non-Productive Tasks</h2>
+                    </div>
+                    <span class="px-3 py-1 bg-orange-100 text-orange-700 text-xs font-semibold rounded-full">Active: {{ non_productive_tasks_count }}</span>
+                </div>
+                
+                <div class="mb-4">
+                    <label class="block text-xs font-semibold text-slate-700 mb-2 uppercase tracking-wide">Current Values</label>
+                    <div class="p-4 bg-gradient-to-br from-slate-50 to-slate-100 border-2 border-slate-200 rounded-xl font-mono text-sm text-slate-700 max-h-48 overflow-y-auto shadow-inner">
+                        {% if non_productive_tasks_text %}
+                            <pre class="whitespace-pre-wrap m-0">{{ non_productive_tasks_text }}</pre>
+                        {% else %}
+                            <span class="text-slate-400 italic">No tasks</span>
+                        {% endif %}
+                    </div>
+                </div>
+                
+                <div>
+                    <label class="block text-xs font-semibold text-slate-700 mb-2 uppercase tracking-wide">New Values</label>
+                    <textarea 
+                        id="non_productive_tasks" 
+                        name="non_productive_tasks" 
+                        rows="7" 
+                        class="w-full p-4 border-2 border-slate-300 rounded-xl font-mono text-sm focus:ring-2 focus:ring-accent-primary focus:border-accent-primary transition-all resize-none shadow-sm"
+                        placeholder="CLEANING&#10;SCRAP&#10;HANDLING&#10;TRANSPORT">{{ non_productive_tasks_text }}</textarea>
+                    <p class="mt-2 text-xs text-slate-500 flex items-center gap-1">
+                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                        </svg>
+                        Format: Task name (one per line)
+                    </p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Save Button -->
+        <div class="flex gap-3 pt-4 border-t border-slate-200">
+            <button 
+                type="submit" 
+                id="saveButton"
+                class="flex-1 flex items-center justify-center gap-2 px-8 py-4 bg-gradient-to-r from-accent-primary to-accent-secondary text-white rounded-xl font-semibold hover:shadow-lg hover:scale-[1.02] transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 disabled:hover:shadow-none">
+                <svg id="saveIcon" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                </svg>
+                <span id="saveText">Save Changes</span>
+            </button>
+        </div>
+        
+        <div id="saveMessage" class="mt-3 text-sm text-center hidden"></div>
+    </form>
+</div>
+
+<script>
+document.getElementById('masterDataForm').addEventListener('submit', function(e) {
+    e.preventDefault();
+    
+    const button = document.getElementById('saveButton');
+    const icon = document.getElementById('saveIcon');
+    const text = document.getElementById('saveText');
+    const message = document.getElementById('saveMessage');
+    
+    // Disable button and show loading state
+    button.disabled = true;
+    text.textContent = 'Saving...';
+    message.classList.add('hidden');
+    
+    // Add checkmark animation
+    icon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>';
+    icon.classList.add('animate-spin');
+    
+    const formData = new FormData(this);
+    
+    fetch('{% url "save_master_data" %}', {
+        method: 'POST',
+        headers: {
+            'X-CSRFToken': getCSRFToken(),
+        },
+        body: formData,
+        credentials: 'same-origin',
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            message.textContent = data.message || 'Data saved successfully!';
+            message.className = 'mt-2 text-sm text-center text-green-600 font-medium';
+            message.classList.remove('hidden');
+            
+            // Show success icon
+            icon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>';
+            icon.classList.remove('animate-spin');
+            
+            // Refresh page after a short delay to show success message
+            setTimeout(() => {
+                window.location.href = '{% url "admin_control_panel" %}';
+            }, 1000);
+        } else {
+            message.textContent = data.error || 'Error saving data';
+            message.className = 'mt-2 text-sm text-center text-red-600 font-medium';
+            message.classList.remove('hidden');
+            
+            // Reset icon
+            icon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>';
+            icon.classList.remove('animate-spin');
+            
+            // Re-enable button on error
+            button.disabled = false;
+            text.textContent = 'Save Changes';
+        }
+    })
+    .catch(error => {
+        message.textContent = 'Error saving: ' + error.message;
+        message.className = 'mt-2 text-sm text-center text-red-600 font-medium';
+        message.classList.remove('hidden');
+        
+        // Reset icon
+        icon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>';
+        icon.classList.remove('animate-spin');
+        
+        // Re-enable button on error
+        button.disabled = false;
+        text.textContent = 'Save Changes';
+    });
+});
+
+function getCookie(name) {
+    let cookieValue = null;
+    if (document.cookie && document.cookie !== '') {
+        const cookies = document.cookie.split(';');
+        for (let i = 0; i < cookies.length; i++) {
+            const cookie = cookies[i].trim();
+            if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                break;
+            }
+        }
+    }
+    return cookieValue;
+}
+
+function getCSRFToken() {
+    const metaTag = document.querySelector('meta[name=csrf-token]');
+    if (metaTag) {
+        return metaTag.getAttribute('content');
+    }
+    return getCookie('csrftoken');
+}
+</script>
+{% endblock %}
