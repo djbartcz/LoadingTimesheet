@@ -152,7 +152,7 @@ AUTH_PASSWORD_VALIDATORS = [
 # Internationalization
 # https://docs.djangoproject.com/en/5.2/topics/i18n/
 
-LANGUAGE_CODE = 'cs'
+LANGUAGE_CODE = 'en-us'
 
 TIME_ZONE = os.environ.get('TIME_ZONE', 'Europe/Prague')
 
@@ -203,3 +203,10 @@ SESSION_COOKIE_NAME = 'timesheet_sessionid'
 SESSION_SAVE_EVERY_REQUEST = os.environ.get(
     'SESSION_SAVE_EVERY_REQUEST', 'False'
 ).lower() == 'true'
+
+# Authentication settings
+# URL where users are redirected to login (used by @login_required decorator)
+LOGIN_URL = '/login/'
+
+# URL where users are redirected after successful login
+LOGIN_REDIRECT_URL = '/'

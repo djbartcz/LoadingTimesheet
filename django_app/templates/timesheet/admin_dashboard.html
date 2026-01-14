@@ -3,17 +3,26 @@
 
 {% block extra_head %}
 <meta name="csrf-token" content="{{ csrf_token }}">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 {% endblock %}
 
 {% block content %}
-<div class="min-h-screen px-4 py-4 max-w-4xl mx-auto">
-    <div class="flex items-center gap-3 py-4">
-        <a href="{% url 'employee_selection' %}" class="text-accent-primary text-base font-medium">← Zpět</a>
-        <h1 class="flex-1 flex items-center gap-2 font-grotesk text-xl">
-            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
+<div class="min-h-screen px-4 py-4 max-w-7xl mx-auto">
+    <!-- Header -->
+    <div class="flex items-center gap-3 mb-6">
+        <a href="{% url 'employee_selection' %}" class="text-accent-primary text-base font-medium hover:text-accent-secondary transition-colors flex items-center gap-1">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
             </svg>
-            Admin přehled
+            Zpět
+        </a>
+        <h1 class="flex-1 flex items-center gap-3 font-grotesk text-2xl font-bold text-slate-900">
+            <div class="p-2 bg-accent-primary/10 rounded-lg">
+                <svg class="w-6 h-6 text-accent-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
+                </svg>
+            </div>
+            Admin Dashboard
         </h1>
         <div class="flex items-center gap-2">
             <a href="{% url 'admin_control_panel' %}" class="bg-white border border-slate-200 rounded-lg p-2.5 hover:bg-slate-50 transition-colors" title="Správa dat">
@@ -50,34 +59,56 @@
     {% endif %}
 
     <!-- Summary Cards -->
-    <div class="grid grid-cols-2 gap-3 mb-5 summary-cards-mobile">
-        <div class="flex items-center gap-3 p-4 bg-white border border-slate-200 rounded-xl">
-            <svg class="w-6 h-6 text-accent-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"></path>
-            </svg>
-            <div class="flex flex-col">
-                <span class="font-grotesk text-2xl font-bold text-slate-900">{{ summary.working_now }}</span>
-                <span class="text-xs text-slate-400 uppercase">Pracuje</span>
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+        <div class="bg-gradient-to-br from-blue-50 to-blue-100 border border-blue-200 rounded-lg p-3 shadow-sm">
+            <div class="flex items-center justify-between mb-1">
+                <span class="text-xs font-medium text-slate-600">Working Now</span>
+                <svg class="w-4 h-4 text-accent-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"></path>
+                </svg>
             </div>
+            <div class="font-grotesk text-2xl font-bold text-slate-900">{{ summary.working_now }}</div>
+            <div class="text-xs text-slate-500">{{ summary.total_employees }} total</div>
         </div>
-        <div class="flex items-center gap-3 p-4 bg-white border border-slate-200 rounded-xl">
-            <svg class="w-6 h-6 text-accent-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"></path>
-            </svg>
-            <div class="flex flex-col">
-                <span class="font-grotesk text-xl font-bold text-slate-900">
-                    {% widthratio summary.today_total_seconds 3600 1 %}h
-                    {% widthratio summary.today_total_seconds|mod:3600 60 1 %}min
-                </span>
-                <span class="text-xs text-slate-400 uppercase">Dnes celkem</span>
+        
+        <div class="bg-gradient-to-br from-green-50 to-green-100 border border-green-200 rounded-lg p-3 shadow-sm">
+            <div class="flex items-center justify-between mb-1">
+                <span class="text-xs font-medium text-slate-600">Today</span>
+                <svg class="w-4 h-4 text-accent-success" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                </svg>
             </div>
+            <div class="font-grotesk text-2xl font-bold text-slate-900">{{ summary.today_total_hours|floatformat:1 }}h</div>
+            <div class="text-xs text-slate-500">Total hours</div>
+        </div>
+        
+        <div class="bg-gradient-to-br from-purple-50 to-purple-100 border border-purple-200 rounded-lg p-3 shadow-sm">
+            <div class="flex items-center justify-between mb-1">
+                <span class="text-xs font-medium text-slate-600">This Week</span>
+                <svg class="w-4 h-4 text-accent-purple" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
+                </svg>
+            </div>
+            <div class="font-grotesk text-2xl font-bold text-slate-900">{{ summary.week_total_hours|floatformat:1 }}h</div>
+            <div class="text-xs text-slate-500">Total hours</div>
+        </div>
+        
+        <div class="bg-gradient-to-br from-orange-50 to-orange-100 border border-orange-200 rounded-lg p-3 shadow-sm">
+            <div class="flex items-center justify-between mb-1">
+                <span class="text-xs font-medium text-slate-600">This Month</span>
+                <svg class="w-4 h-4 text-accent-orange" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
+                </svg>
+            </div>
+            <div class="font-grotesk text-2xl font-bold text-slate-900">{{ summary.month_total_hours|floatformat:1 }}h</div>
+            <div class="text-xs text-slate-500">Total hours</div>
         </div>
     </div>
 
     <!-- Export Button -->
-    <div class="mb-5">
-        <button id="exportButton" onclick="exportToExcel()" class="w-full flex items-center justify-center gap-2 px-4 py-3 bg-accent-primary text-white rounded-xl font-semibold hover:bg-opacity-90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
-            <svg id="exportIcon" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <div class="mb-4">
+        <button id="exportButton" onclick="exportToExcel()" class="w-full flex items-center justify-center gap-2 px-4 py-2 bg-accent-primary text-white rounded-lg text-sm font-semibold hover:bg-opacity-90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+            <svg id="exportIcon" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
             </svg>
             <span id="exportText">Exportovat do Excel</span>
@@ -85,96 +116,479 @@
         <div id="exportMessage" class="mt-2 text-sm text-center hidden"></div>
     </div>
 
-    <!-- Employee List -->
-    <div>
-        <h2 class="text-base font-semibold mb-3 text-slate-600">Zaměstnanci ({{ employees|length }})</h2>
-        <div class="flex flex-col gap-2">
-            {% for emp in employees %}
-            <div class="flex items-center justify-between p-3.5 bg-white border border-slate-200 rounded-xl {% if emp.is_working %}{% if emp.is_non_productive %}border-l-4 border-accent-orange {% else %}border-l-4 border-accent-success {% endif %}{% endif %}">
-                <div class="flex items-center gap-3">
-                    <svg class="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path>
-                    </svg>
-                    <div class="flex flex-col">
-                        <span class="font-semibold text-sm">{{ emp.employee_name }}</span>
-                        {% if emp.is_working %}
-                        <span class="flex items-center gap-1 text-xs text-slate-400">
-                            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                            </svg>
-                            {{ emp.current_project|default:emp.current_task }}
-                        </span>
-                        {% endif %}
-                    </div>
-                </div>
-                <div class="flex items-center gap-3">
-                    <span class="font-grotesk font-semibold text-slate-600 text-sm">
-                        {% widthratio emp.today_seconds 3600 1 %}h {% widthratio emp.today_seconds|mod:3600 60 1 %}min
-                    </span>
-                    {% if emp.is_working %}
-                    <div class="flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold {% if emp.is_non_productive %}bg-orange-100 text-accent-orange {% else %}bg-green-100 text-accent-success {% endif %}">
-                        <span class="w-1.5 h-1.5 rounded-full pulse-dot {% if emp.is_non_productive %}bg-accent-orange {% else %}bg-accent-success {% endif %}"></span>
-                        {% if emp.is_non_productive %}Neprod.{% else %}Pracuje{% endif %}
-                    </div>
-                    {% endif %}
-                </div>
+    <!-- Charts Row 1: Hours per Person & Hours per Project -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
+        <!-- Hours per Person Chart -->
+        <div class="bg-white border border-slate-200 rounded-lg p-4 shadow-sm">
+            <h3 class="text-sm font-semibold text-slate-900 mb-3 flex items-center gap-2">
+                <svg class="w-4 h-4 text-accent-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path>
+                </svg>
+                Hours per Person
+            </h3>
+            <div class="h-48">
+                <canvas id="hoursPerPersonChart"></canvas>
             </div>
-            {% empty %}
-            <div class="text-center py-8 text-slate-500">Žádní zaměstnanci</div>
-            {% endfor %}
+        </div>
+
+        <!-- Hours per Project Chart -->
+        <div class="bg-white border border-slate-200 rounded-lg p-4 shadow-sm">
+            <h3 class="text-sm font-semibold text-slate-900 mb-3 flex items-center gap-2">
+                <svg class="w-4 h-4 text-accent-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path>
+                </svg>
+                Hours per Project
+            </h3>
+            <div class="h-48">
+                <canvas id="hoursPerProjectChart"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <!-- Charts Row 2: Daily Trends & Productivity -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
+        <!-- Daily Trends Chart -->
+        <div class="bg-white border border-slate-200 rounded-lg p-4 shadow-sm">
+            <h3 class="text-sm font-semibold text-slate-900 mb-3 flex items-center gap-2">
+                <svg class="w-4 h-4 text-accent-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
+                </svg>
+                Daily Trends (This Week)
+            </h3>
+            <div class="h-48">
+                <canvas id="dailyTrendsChart"></canvas>
+            </div>
+        </div>
+
+        <!-- Productivity Chart -->
+        <div class="bg-white border border-slate-200 rounded-lg p-4 shadow-sm">
+            <h3 class="text-sm font-semibold text-slate-900 mb-3 flex items-center gap-2">
+                <svg class="w-4 h-4 text-accent-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 3.055A9.001 9.001 0 1020.945 13H11V3.055z"></path>
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.488 9H15V3.512A9.025 9.025 0 0120.488 9z"></path>
+                </svg>
+                Productivity Overview
+            </h3>
+            <div class="h-48">
+                <canvas id="productivityChart"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <!-- Two Tables Side by Side: Employees and Projects -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
+        <!-- Employees Table -->
+        <div class="bg-white border border-slate-200 rounded-lg p-4 shadow-sm">
+            <h2 class="text-sm font-semibold mb-3 text-slate-900 flex items-center gap-2">
+                <svg class="w-4 h-4 text-accent-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"></path>
+                </svg>
+                Employees ({{ employees|length }})
+            </h2>
+            <div class="overflow-x-auto">
+                <table class="w-full text-xs">
+                    <thead>
+                        <tr class="border-b border-slate-200">
+                            <th class="text-left py-2 px-2 font-semibold text-slate-600">Name</th>
+                            <th class="text-right py-2 px-2 font-semibold text-slate-600">Today</th>
+                            <th class="text-right py-2 px-2 font-semibold text-slate-600">Week</th>
+                            <th class="text-right py-2 px-2 font-semibold text-slate-600">Month</th>
+                            <th class="text-center py-2 px-2 font-semibold text-slate-600">Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for emp in employees %}
+                        <tr class="border-b border-slate-100 hover:bg-slate-50 transition-colors">
+                            <td class="py-2 px-2">
+                                <div class="font-medium text-slate-900">{{ emp.employee_name|truncatewords:2 }}</div>
+                                {% if emp.is_working %}
+                                <div class="text-xs text-slate-500 mt-0.5">{{ emp.current_project|default:emp.current_task|truncatewords:2 }}</div>
+                                {% endif %}
+                            </td>
+                            <td class="py-2 px-2 text-right font-semibold text-slate-700">
+                                {{ emp.today_hours|floatformat:1 }}h
+                            </td>
+                            <td class="py-2 px-2 text-right font-semibold text-slate-700">
+                                {{ emp.week_hours|floatformat:1 }}h
+                            </td>
+                            <td class="py-2 px-2 text-right font-semibold text-slate-700">
+                                {{ emp.month_hours|default:0|floatformat:1 }}h
+                            </td>
+                            <td class="py-2 px-2 text-center">
+                                {% if emp.is_working %}
+                                <div class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-xs font-semibold {% if emp.is_non_productive %}bg-orange-100 text-accent-orange {% else %}bg-green-100 text-accent-success {% endif %}">
+                                    <span class="w-1 h-1 rounded-full {% if emp.is_non_productive %}bg-accent-orange {% else %}bg-accent-success {% endif %}"></span>
+                                    {% if emp.is_non_productive %}N{% else %}W{% endif %}
+                                </div>
+                                {% else %}
+                                <span class="text-xs text-slate-400">Idle</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% empty %}
+                        <tr>
+                            <td colspan="5" class="py-4 text-center text-slate-500">No employees found</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Projects Table -->
+        <div class="bg-white border border-slate-200 rounded-lg p-4 shadow-sm">
+            <h2 class="text-sm font-semibold mb-3 text-slate-900 flex items-center gap-2">
+                <svg class="w-4 h-4 text-accent-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path>
+                </svg>
+                Projects ({{ stats_per_project|length }})
+            </h2>
+            <div class="overflow-x-auto">
+                <table class="w-full text-xs">
+                    <thead>
+                        <tr class="border-b border-slate-200">
+                            <th class="text-left py-2 px-2 font-semibold text-slate-600">Project</th>
+                            <th class="text-right py-2 px-2 font-semibold text-slate-600">Hours</th>
+                            <th class="text-right py-2 px-2 font-semibold text-slate-600">Records</th>
+                            <th class="text-right py-2 px-2 font-semibold text-slate-600">Employees</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for proj in stats_per_project %}
+                        <tr class="border-b border-slate-100 hover:bg-slate-50 transition-colors">
+                            <td class="py-2 px-2">
+                                <div class="font-medium text-slate-900">{{ proj.name|truncatewords:3 }}</div>
+                            </td>
+                            <td class="py-2 px-2 text-right font-semibold text-slate-700">
+                                {{ proj.hours|floatformat:1 }}h
+                            </td>
+                            <td class="py-2 px-2 text-right text-slate-600">
+                                {{ proj.records }}
+                            </td>
+                            <td class="py-2 px-2 text-right text-slate-600">
+                                {{ proj.employee_count }}
+                            </td>
+                        </tr>
+                        {% empty %}
+                        <tr>
+                            <td colspan="4" class="py-4 text-center text-slate-500">No projects found</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
         </div>
     </div>
 </div>
 
 <script>
+// Chart.js configuration
+const chartColors = {
+    primary: '#0284c7',
+    success: '#10b981',
+    orange: '#ea580c',
+    purple: '#8b5cf6',
+    danger: '#ef4444',
+};
+
+// Hours per Person Chart
+{% if stats_per_person %}
+const hoursPerPersonData = {
+    labels: [{% for stat in stats_per_person %}'{{ stat.name|escapejs }}'{% if not forloop.last %},{% endif %}{% endfor %}],
+    datasets: [{
+        label: 'Hours',
+        data: [{% for stat in stats_per_person %}{{ stat.month_hours }}{% if not forloop.last %},{% endif %}{% endfor %}],
+        backgroundColor: chartColors.primary + '80',
+        borderColor: chartColors.primary,
+        borderWidth: 2,
+    }]
+};
+
+new Chart(document.getElementById('hoursPerPersonChart'), {
+    type: 'bar',
+    data: hoursPerPersonData,
+    options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+            legend: { display: false },
+            tooltip: {
+                callbacks: {
+                    label: function(context) {
+                        return context.parsed.y.toFixed(1) + ' hours';
+                    }
+                }
+            }
+        },
+        scales: {
+            y: {
+                beginAtZero: true,
+                ticks: {
+                    callback: function(value) {
+                        return value + 'h';
+                    }
+                }
+            },
+            x: {
+                ticks: {
+                    maxRotation: 45,
+                    minRotation: 45
+                }
+            }
+        }
+    }
+});
+{% else %}
+// No data for hours per person
+new Chart(document.getElementById('hoursPerPersonChart'), {
+    type: 'bar',
+    data: { labels: [], datasets: [] },
+    options: { responsive: true, maintainAspectRatio: false }
+});
+{% endif %}
+
+// Hours per Project Chart
+{% if stats_per_project %}
+const hoursPerProjectData = {
+    labels: [{% for proj in stats_per_project %}'{{ proj.name|truncatewords:3|escapejs }}'{% if not forloop.last %},{% endif %}{% endfor %}],
+    datasets: [{
+        label: 'Hours',
+        data: [{% for proj in stats_per_project %}{{ proj.hours }}{% if not forloop.last %},{% endif %}{% endfor %}],
+        backgroundColor: chartColors.success + '80',
+        borderColor: chartColors.success,
+        borderWidth: 2,
+    }]
+};
+
+new Chart(document.getElementById('hoursPerProjectChart'), {
+    type: 'bar',
+    data: hoursPerProjectData,
+    options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        indexAxis: 'y',
+        plugins: {
+            legend: { display: false },
+            tooltip: {
+                callbacks: {
+                    label: function(context) {
+                        return context.parsed.x.toFixed(1) + ' hours';
+                    }
+                }
+            }
+        },
+        scales: {
+            x: {
+                beginAtZero: true,
+                ticks: {
+                    callback: function(value) {
+                        return value + 'h';
+                    }
+                }
+            }
+        }
+    }
+});
+
+// Daily Trends Chart
+const dailyTrendsData = {
+    labels: [{% for day in daily_trends %}'{{ day.day_name }}'{% if not forloop.last %},{% endif %}{% endfor %}],
+    datasets: [{
+        label: 'Total Hours',
+        data: [{% for day in daily_trends %}{{ day.total_hours }}{% if not forloop.last %},{% endif %}{% endfor %}],
+        borderColor: chartColors.primary,
+        backgroundColor: chartColors.primary + '20',
+        borderWidth: 2,
+        fill: true,
+        tension: 0.4,
+    }, {
+        label: 'Productive',
+        data: [{% for day in daily_trends %}{{ day.productive_hours }}{% if not forloop.last %},{% endif %}{% endfor %}],
+        borderColor: chartColors.success,
+        backgroundColor: chartColors.success + '20',
+        borderWidth: 2,
+        fill: true,
+        tension: 0.4,
+    }, {
+        label: 'Non-Productive',
+        data: [{% for day in daily_trends %}{{ day.non_productive_hours }}{% if not forloop.last %},{% endif %}{% endfor %}],
+        borderColor: chartColors.orange,
+        backgroundColor: chartColors.orange + '20',
+        borderWidth: 2,
+        fill: true,
+        tension: 0.4,
+    }]
+};
+
+new Chart(document.getElementById('dailyTrendsChart'), {
+    type: 'line',
+    data: dailyTrendsData,
+    options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+            legend: {
+                position: 'top',
+            },
+            tooltip: {
+                callbacks: {
+                    label: function(context) {
+                        return context.dataset.label + ': ' + context.parsed.y.toFixed(1) + 'h';
+                    }
+                }
+            }
+        },
+        scales: {
+            y: {
+                beginAtZero: true,
+                ticks: {
+                    callback: function(value) {
+                        return value + 'h';
+                    }
+                }
+            }
+        }
+    }
+});
+{% else %}
+// No data for daily trends
+new Chart(document.getElementById('dailyTrendsChart'), {
+    type: 'line',
+    data: { labels: [], datasets: [] },
+    options: { responsive: true, maintainAspectRatio: false }
+});
+{% endif %}
+
+// Productivity Chart
+{% if summary.month_total_hours %}
+const productivityData = {
+    labels: ['Productive', 'Non-Productive'],
+    datasets: [{
+        data: [{{ summary.month_productive_hours }}, {{ summary.month_non_productive_hours }}],
+        backgroundColor: [chartColors.success, chartColors.orange],
+        borderWidth: 2,
+        borderColor: '#fff',
+    }]
+};
+
+new Chart(document.getElementById('productivityChart'), {
+    type: 'doughnut',
+    data: productivityData,
+    options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+            legend: {
+                position: 'bottom',
+            },
+            tooltip: {
+                callbacks: {
+                    label: function(context) {
+                        const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                        const percentage = ((context.parsed / total) * 100).toFixed(1);
+                        return context.label + ': ' + context.parsed.toFixed(1) + 'h (' + percentage + '%)';
+                    }
+                }
+            }
+        }
+    }
+});
+{% else %}
+// No productivity data
+new Chart(document.getElementById('productivityChart'), {
+    type: 'doughnut',
+    data: { labels: [], datasets: [] },
+    options: { responsive: true, maintainAspectRatio: false }
+});
+{% endif %}
+
+// Top Tasks Chart
+{% if task_stats %}
+const topTasksData = {
+    labels: [{% for task in task_stats %}'{{ task.name|truncatewords:2|escapejs }}'{% if not forloop.last %},{% endif %}{% endfor %}],
+    datasets: [{
+        label: 'Hours',
+        data: [{% for task in task_stats %}{{ task.hours }}{% if not forloop.last %},{% endif %}{% endfor %}],
+        backgroundColor: chartColors.purple + '80',
+        borderColor: chartColors.purple,
+        borderWidth: 2,
+    }]
+};
+
+new Chart(document.getElementById('topTasksChart'), {
+    type: 'bar',
+    data: topTasksData,
+    options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        indexAxis: 'y',
+        plugins: {
+            legend: { display: false },
+            tooltip: {
+                callbacks: {
+                    label: function(context) {
+                        return context.parsed.x.toFixed(1) + ' hours';
+                    }
+                }
+            }
+        },
+        scales: {
+            x: {
+                beginAtZero: true,
+                ticks: {
+                    callback: function(value) {
+                        return value + 'h';
+                    }
+                }
+            }
+        }
+    }
+});
+{% else %}
+// No task stats
+new Chart(document.getElementById('topTasksChart'), {
+    type: 'bar',
+    data: { labels: [], datasets: [] },
+    options: { responsive: true, maintainAspectRatio: false, indexAxis: 'y' }
+});
+{% endif %}
+
+// Export function
 function exportToExcel() {
     const button = document.getElementById('exportButton');
     const icon = document.getElementById('exportIcon');
     const text = document.getElementById('exportText');
     const message = document.getElementById('exportMessage');
     
-    // Disable button and show loading state
     button.disabled = true;
     text.textContent = 'Exportuji...';
     message.classList.add('hidden');
-    
-    // Add spinning animation to icon
     icon.classList.add('animate-spin');
     
-    // Fetch the file and trigger download
     fetch('{% url "export_to_excel" %}', {
         method: 'GET',
         credentials: 'same-origin',
     })
     .then(response => {
-        if (!response.ok) {
-            throw new Error('Export failed');
-        }
-        // Get filename from Content-Disposition header
+        if (!response.ok) throw new Error('Export failed');
         const contentDisposition = response.headers.get('Content-Disposition');
         let filename = 'TimeSheet.xlsx';
         if (contentDisposition) {
             const filenameMatch = contentDisposition.match(/filename="(.+)"/);
-            if (filenameMatch) {
-                filename = filenameMatch[1];
-            }
+            if (filenameMatch) filename = filenameMatch[1];
         }
-        
         return response.blob().then(blob => ({ blob, filename }));
     })
     .then(({ blob, filename }) => {
-        // Create download link
         const url = window.URL.createObjectURL(blob);
         const link = document.createElement('a');
         link.href = url;
         link.download = filename;
-        
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
         window.URL.revokeObjectURL(url);
         
-        // Show success message
         message.textContent = 'Export dokončen! Soubor se stahuje...';
         message.className = 'mt-2 text-sm text-center text-green-600 font-medium';
         message.classList.remove('hidden');
@@ -185,41 +599,11 @@ function exportToExcel() {
         message.classList.remove('hidden');
     })
     .finally(() => {
-        // Re-enable button
         button.disabled = false;
         text.textContent = 'Exportovat do Excel';
         icon.classList.remove('animate-spin');
-        
-        // Hide message after 5 seconds
-        setTimeout(() => {
-            message.classList.add('hidden');
-        }, 5000);
+        setTimeout(() => message.classList.add('hidden'), 5000);
     });
-}
-
-function getCookie(name) {
-    let cookieValue = null;
-    if (document.cookie && document.cookie !== '') {
-        const cookies = document.cookie.split(';');
-        for (let i = 0; i < cookies.length; i++) {
-            const cookie = cookies[i].trim();
-            if (cookie.substring(0, name.length + 1) === (name + '=')) {
-                cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
-                break;
-            }
-        }
-    }
-    return cookieValue;
-}
-
-// Get CSRF token from meta tag or cookie
-function getCSRFToken() {
-    const metaTag = document.querySelector('meta[name=csrf-token]');
-    if (metaTag) {
-        return metaTag.getAttribute('content');
-    }
-    return getCookie('csrftoken');
 }
 </script>
 {% endblock %}
-

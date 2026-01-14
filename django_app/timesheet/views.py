@@ -14,6 +14,9 @@ from django.apps import apps
 from openpyxl import Workbook
 from io import BytesIO
 from django.db import transaction
+from django.contrib.auth import authenticate, login, logout
+from django.contrib.auth.decorators import login_required as django_login_required
+from django.contrib.auth.models import User, Group
 
 logger = logging.getLogger(__name__)
 
@@ -79,19 +82,35 @@ def convert_to_excel_timezone(dt):
     return dt.astimezone(excel_tz)
 
 
-# Login decorator
-def login_required(view_func):
-    """Decorator to require login for views"""
+# Admin required decorator
+def admin_required(view_func):
+    """
+    Decorator to require admin access for views.
+    Users must be in the 'Admin' group, have is_staff=True, or be superuser.
+    """
     @wraps(view_func)
+    @django_login_required
     def wrapper(request, *args, **kwargs):
-        if not request.session.get('authenticated'):
-            # Redirect to login with next parameter to return after login
-            from django.urls import reverse
-            login_url = reverse('login')
-            current_path = request.get_full_path()
-            return redirect(f"{login_url}?next={current_path}")
-        return view_func(request, *args, **kwargs)
+        # Check if user has admin access (Admin group, staff, or superuser)
+        has_admin_access = (
+            request.user.groups.filter(name='Admin').exists() or
+            request.user.is_staff or
+            request.user.is_superuser
+        )
+        
+        if has_admin_access:
+            return view_func(request, *args, **kwargs)
+        
+        # User doesn't have admin access - redirect to login
+        from django.urls import reverse
+        login_url = reverse('login')
+        current_path = request.get_full_path()
+        return redirect(f"{login_url}?next={current_path}")
     return wrapper
+
+# Login required decorator (for regular users)
+# Just use Django's built-in decorator - it will use LOGIN_URL from settings
+login_required = django_login_required
 
 # Get Excel client from app config
 def get_excel_client():
@@ -131,13 +150,9 @@ def format_time(seconds):
 
 # Login View
 def login_view(request):
-    """Login page - handles authentication"""
-    # Get credentials from environment variables
-    admin_username = os.environ.get('ADMIN_USERNAME', 'admin')
-    admin_password = os.environ.get('ADMIN_PASSWORD', 'admin')
-    
+    """Login page - handles authentication using Django User model"""
     # If already authenticated, redirect to home
-    if request.session.get('authenticated'):
+    if request.user.is_authenticated:
         return redirect('employee_selection')
     
     # Handle POST request (login form submission)
@@ -145,8 +160,12 @@ def login_view(request):
         username = request.POST.get('username', '')
         password = request.POST.get('password', '')
         
-        if username == admin_username and password == admin_password:
-            request.session['authenticated'] = True
+        # Authenticate using Django's authentication system
+        user = authenticate(request, username=username, password=password)
+        
+        if user is not None:
+            # Login the user
+            login(request, user)
             # Redirect to next page if specified, otherwise to employee selection
             next_url = request.GET.get('next', 'employee_selection')
             # Validate next_url to prevent open redirects
@@ -164,8 +183,8 @@ def login_view(request):
 
 # Logout View
 def logout_view(request):
-    """Logout - clears session"""
-    request.session.flush()
+    """Logout - uses Django logout"""
+    logout(request)
     return redirect('login')
 
 
@@ -211,10 +230,18 @@ def employee_selection(request):
     except Exception as e:
         logger.error(f"Error fetching active timers: {e}", exc_info=True)
     
+    # Check if user has admin access (Admin group, staff, or superuser)
+    is_admin = (
+        request.user.groups.filter(name='Admin').exists() or
+        request.user.is_staff or
+        request.user.is_superuser
+    )
+    
     return render(request, 'timesheet/employee_selection.html', {
         'employees': employees,
         'active_timers': active_timers,
         'error_message': error_message,
+        'is_admin': is_admin,
     })
 
 
@@ -546,7 +573,7 @@ def stop_timer(request, employee_id):
 
 
 # Admin Dashboard
-@login_required
+@admin_required
 def admin_dashboard(request):
     """Admin dashboard"""
     
@@ -557,76 +584,258 @@ def admin_dashboard(request):
         employees = [
             {"id": emp.id, "name": emp.name}
             for emp in db_employees
+            if emp and emp.id and emp.name
         ]
         logger.info(f"Admin dashboard: Loaded {len(employees)} employees from database")
     except Exception as e:
         logger.error(f"Error fetching employees for admin dashboard: {e}", exc_info=True)
+        employees = []
+    
+    # Ensure employees is a list
+    if not isinstance(employees, list):
+        employees = []
     
     today_start = get_today_start()
     week_start = get_week_start()
     
+    # Calculate month start (first day of current month)
+    now = timezone.now()
+    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    
     try:
-        active_timers = ActiveTimer.objects.all()
-        today_records = TimeRecord.objects.filter(end_time__gte=today_start)[:1000]
-        week_records = TimeRecord.objects.filter(end_time__gte=week_start)[:5000]
+        active_timers = list(ActiveTimer.objects.all())
+        today_records = list(TimeRecord.objects.filter(end_time__gte=today_start)[:1000])
+        week_records = list(TimeRecord.objects.filter(end_time__gte=week_start)[:5000])
+        month_records_for_stats = list(TimeRecord.objects.filter(end_time__gte=month_start)[:10000])
         
         employee_stats = []
-        active_map = {t.employee_id: t for t in active_timers}
+        active_map = {}
+        for t in active_timers:
+            if t and t.employee_id:
+                active_map[t.employee_id] = t
         
         for emp in employees:
-            emp_id = emp['id']
-            emp_today = [r for r in today_records if r.employee_id == emp_id]
-            emp_week = [r for r in week_records if r.employee_id == emp_id]
+            if not emp or not isinstance(emp, dict) or 'id' not in emp:
+                continue
+            emp_id = emp.get('id')
+            if not emp_id:
+                continue
+            emp_today = [r for r in today_records if r and r.employee_id == emp_id]
+            emp_week = [r for r in week_records if r and r.employee_id == emp_id]
+            emp_month = [r for r in month_records_for_stats if r and r.employee_id == emp_id]
             
-            today_secs = sum(r.duration_seconds or 0 for r in emp_today)
-            week_secs = sum(r.duration_seconds or 0 for r in emp_week)
+            today_secs = sum((r.duration_seconds or 0) for r in emp_today)
+            week_secs = sum((r.duration_seconds or 0) for r in emp_week)
+            month_secs = sum((r.duration_seconds or 0) for r in emp_month)
             
             active = active_map.get(emp_id)
             
             employee_stats.append({
                 'employee_id': emp_id,
-                'employee_name': emp['name'],
+                'employee_name': emp.get('name', 'Unknown'),
                 'today_seconds': today_secs,
+                'today_hours': round(today_secs / 3600, 2),
                 'week_seconds': week_secs,
+                'week_hours': round(week_secs / 3600, 2),
+                'month_seconds': month_secs,
+                'month_hours': round(month_secs / 3600, 2),
                 'is_working': active is not None,
                 'is_on_break': False,
-                'is_non_productive': active.is_non_productive if active else False,
-                'current_task': active.task if active else None,
-                'current_project': active.project_name if active else None,
-                'start_time': active.start_time.isoformat() if active else None,
+                'is_non_productive': getattr(active, 'is_non_productive', False) if active else False,
+                'current_task': getattr(active, 'task', None) if active else None,
+                'current_project': getattr(active, 'project_name', None) if active else None,
+                'start_time': active.start_time.isoformat() if active and hasattr(active, 'start_time') and active.start_time else None,
             })
     except Exception as e:
         logger.error(f"Error fetching time records for admin dashboard: {e}", exc_info=True)
         employee_stats = []
     
-    employee_stats.sort(key=lambda x: (not x['is_working'], x['employee_name']))
+    # Sort employee stats safely
+    try:
+        employee_stats.sort(key=lambda x: (not x.get('is_working', False), x.get('employee_name', '')))
+    except Exception as e:
+        logger.error(f"Error sorting employee stats: {e}", exc_info=True)
     
-    total_today = sum(s['today_seconds'] for s in employee_stats)
-    total_week = sum(s['week_seconds'] for s in employee_stats)
-    working_count = sum(1 for s in employee_stats if s['is_working'])
+    # Ensure employee_stats is a list
+    if not employee_stats:
+        employee_stats = []
+    
+    total_today = sum(s.get('today_seconds', 0) or 0 for s in employee_stats)
+    total_week = sum(s.get('week_seconds', 0) or 0 for s in employee_stats)
+    working_count = sum(1 for s in employee_stats if s.get('is_working', False))
+    
+    # Use month_records_for_stats if available, otherwise fetch again
+    try:
+        if 'month_records_for_stats' in locals():
+            month_records = month_records_for_stats
+        else:
+            month_records = list(TimeRecord.objects.filter(end_time__gte=month_start)[:10000])
+    except Exception as e:
+        logger.error(f"Error fetching month records: {e}", exc_info=True)
+        month_records = []
+    
+    # Statistics per person (for charts)
+    stats_per_person = []
+    if employee_stats:
+        for emp in employee_stats:
+            if emp and isinstance(emp, dict) and 'employee_id' in emp:
+                emp_month = [r for r in month_records if r.employee_id == emp.get('employee_id')]
+                month_secs = sum(r.duration_seconds or 0 for r in emp_month)
+                prod_secs = sum(r.duration_seconds or 0 for r in emp_month if not r.is_non_productive)
+                nonprod_secs = sum(r.duration_seconds or 0 for r in emp_month if r.is_non_productive)
+                
+                stats_per_person.append({
+                    'name': emp.get('employee_name', 'Unknown'),
+                    'today_hours': round((emp.get('today_seconds', 0) or 0) / 3600, 2),
+                    'week_hours': round((emp.get('week_seconds', 0) or 0) / 3600, 2),
+                    'month_hours': round(month_secs / 3600, 2),
+                    'productive_hours': round(prod_secs / 3600, 2),
+                    'non_productive_hours': round(nonprod_secs / 3600, 2),
+                })
+    
+    # Statistics per project (for charts)
+    stats_per_project = {}
+    stats_per_project_list = []
+    try:
+        for record in month_records:
+            if record and record.project_id and not record.is_non_productive:
+                project_name = record.project_name or record.project_id
+                if project_name not in stats_per_project:
+                    stats_per_project[project_name] = {
+                        'hours': 0,
+                        'records': 0,
+                        'employees': set()
+                    }
+                stats_per_project[project_name]['hours'] += (record.duration_seconds or 0) / 3600
+                stats_per_project[project_name]['records'] += 1
+                stats_per_project[project_name]['employees'].add(record.employee_id)
+        
+        # Convert to list and sort by hours
+        stats_per_project_list = [
+            {
+                'name': name,
+                'hours': round(data.get('hours', 0), 2),
+                'records': data.get('records', 0),
+                'employee_count': len(data.get('employees', set()))
+            }
+            for name, data in stats_per_project.items()
+        ]
+        stats_per_project_list.sort(key=lambda x: x.get('hours', 0), reverse=True)
+    except Exception as e:
+        logger.error(f"Error calculating project stats: {e}", exc_info=True)
+        stats_per_project_list = []
+    
+    # Daily trends (current week: Monday to Sunday)
+    daily_trends = []
+    try:
+        # Get Monday of current week
+        current_week_start = get_week_start()
+        
+        # Loop through 7 days from Monday to Sunday
+        for i in range(7):
+            day_start = current_week_start + timedelta(days=i)
+            day_end = day_start + timedelta(days=1)
+            day_records = TimeRecord.objects.filter(
+                end_time__gte=day_start,
+                end_time__lt=day_end
+            )
+            day_total = sum((r.duration_seconds or 0) for r in day_records) / 3600
+            day_prod = sum((r.duration_seconds or 0) for r in day_records if not r.is_non_productive) / 3600
+            day_nonprod = sum((r.duration_seconds or 0) for r in day_records if r.is_non_productive) / 3600
+            
+            # Get day name (Mon, Tue, Wed, etc.)
+            day_name = day_start.strftime('%a')
+            
+            daily_trends.append({
+                'date': day_start.strftime('%Y-%m-%d'),
+                'day_name': day_name,
+                'total_hours': round(day_total, 2),
+                'productive_hours': round(day_prod, 2),
+                'non_productive_hours': round(day_nonprod, 2),
+            })
+    except Exception as e:
+        logger.error(f"Error calculating daily trends: {e}", exc_info=True)
+        daily_trends = []
+    
+    # Task statistics (top tasks)
+    task_stats = {}
+    task_stats_list = []
+    try:
+        for record in month_records:
+            if record and not record.is_non_productive and record.task:
+                task_name = record.task
+                if task_name not in task_stats:
+                    task_stats[task_name] = {'hours': 0, 'count': 0}
+                task_stats[task_name]['hours'] += (record.duration_seconds or 0) / 3600
+                task_stats[task_name]['count'] += 1
+        
+        task_stats_list = [
+            {'name': name, 'hours': round(data.get('hours', 0), 2), 'count': data.get('count', 0)}
+            for name, data in task_stats.items()
+        ]
+        task_stats_list.sort(key=lambda x: x.get('hours', 0), reverse=True)
+        task_stats_list = task_stats_list[:10]  # Top 10
+    except Exception as e:
+        logger.error(f"Error calculating task stats: {e}", exc_info=True)
+        task_stats_list = []
+    
+    # Productivity vs Non-productive (month)
+    try:
+        month_prod = sum((r.duration_seconds or 0) for r in month_records if r and not r.is_non_productive) / 3600
+        month_nonprod = sum((r.duration_seconds or 0) for r in month_records if r and r.is_non_productive) / 3600
+    except Exception as e:
+        logger.error(f"Error calculating productivity stats: {e}", exc_info=True)
+        month_prod = 0
+        month_nonprod = 0
     
     # Alerts for long running timers (> 4 hours)
     alerts = []
-    for timer in active_timers:
-        elapsed = (timezone.now() - timer.start_time).total_seconds()
-        if elapsed > 4 * 3600:
-            alerts.append({
-                'type': 'long_running',
-                'employee_name': timer.employee_name,
-                'task': timer.task,
-                'hours': round(elapsed / 3600, 1),
-                'message': f"{timer.employee_name} pracuje už {round(elapsed/3600, 1)} hodin"
-            })
+    try:
+        for timer in active_timers:
+            if timer and hasattr(timer, 'start_time') and timer.start_time:
+                elapsed = (timezone.now() - timer.start_time).total_seconds()
+                if elapsed > 4 * 3600:
+                    alerts.append({
+                        'type': 'long_running',
+                        'employee_name': getattr(timer, 'employee_name', 'Unknown'),
+                        'task': getattr(timer, 'task', 'Unknown'),
+                        'hours': round(elapsed / 3600, 1),
+                        'message': f"{getattr(timer, 'employee_name', 'Unknown')} pracuje už {round(elapsed/3600, 1)} hodin"
+                    })
+    except Exception as e:
+        logger.error(f"Error calculating alerts: {e}", exc_info=True)
+        alerts = []
+    
+    # Ensure all lists are initialized
+    if not stats_per_person:
+        stats_per_person = []
+    if not stats_per_project_list:
+        stats_per_project_list = []
+    if not daily_trends:
+        daily_trends = []
+    if not task_stats_list:
+        task_stats_list = []
+    if not alerts:
+        alerts = []
     
     return render(request, 'timesheet/admin_dashboard.html', {
-        'employees': employee_stats,
+        'employees': employee_stats or [],
         'summary': {
-            'total_employees': len(employees),
+            'total_employees': len(employees) if employees else 0,
             'working_now': working_count,
             'on_break': 0,
             'today_total_seconds': total_today,
             'week_total_seconds': total_week,
+            'today_total_hours': round(total_today / 3600, 2) if total_today else 0,
+            'week_total_hours': round(total_week / 3600, 2) if total_week else 0,
+            'month_total_hours': round((month_prod + month_nonprod), 2),
+            'month_productive_hours': round(month_prod, 2),
+            'month_non_productive_hours': round(month_nonprod, 2),
         },
+        'stats_per_person': stats_per_person,
+        'stats_per_project': stats_per_project_list[:15],  # Top 15 projects
+        'daily_trends': daily_trends,
+        'task_stats': task_stats_list,
         'alerts': alerts,
     })
 
@@ -1002,7 +1211,7 @@ def sync_timesheet_data():
 
 
 # Export Database to Excel (download)
-@login_required
+@admin_required
 def export_to_excel(request):
     """
     Export all data from database to Excel file and return as download.
@@ -1164,7 +1373,7 @@ def sync_to_excel(request):
 
 
 # Admin Control Panel
-@login_required
+@admin_required
 def admin_control_panel(request):
     """Admin control panel for managing employees, projects, and tasks"""
     # Get all active records
@@ -1173,19 +1382,11 @@ def admin_control_panel(request):
     productive_tasks = Task.objects.filter(is_active=True, is_non_productive=False).order_by('name')
     non_productive_tasks = Task.objects.filter(is_active=True, is_non_productive=True).order_by('name')
     
-    # Debug: Print what's in the database
-    all_tasks = Task.objects.all()
-    print(f"[DEBUG] All tasks in DB: {[(t.name, t.is_non_productive, t.is_active) for t in all_tasks]}")
-    print(f"[DEBUG] Productive tasks (active): {[t.name for t in productive_tasks]}")
-    print(f"[DEBUG] Non-productive tasks (active): {[t.name for t in non_productive_tasks]}")
-    
     # Format for display in textarea (ID\tName format)
     employees_text = '\n'.join([f"{emp.id}\t{emp.name}" for emp in employees])
     projects_text = '\n'.join([f"{proj.id}\t{proj.name}" for proj in projects])
     productive_tasks_text = '\n'.join([task.name for task in productive_tasks])
     non_productive_tasks_text = '\n'.join([task.name for task in non_productive_tasks])
-    
-    print(f"[DEBUG] Productive tasks text to display: {repr(productive_tasks_text)}")
     
     return render(request, 'timesheet/admin_control_panel.html', {
         'employees_text': employees_text,
@@ -1199,7 +1400,7 @@ def admin_control_panel(request):
     })
 
 
-@login_required
+@admin_required
 def save_master_data(request):
     """Save master data from admin control panel"""
     if request.method != 'POST':
@@ -1293,14 +1494,11 @@ def save_master_data(request):
             
             # Use splitlines() to handle all line ending types (\n, \r\n, \r)
             lines = productive_tasks_text.splitlines()
-            print(f"[DEBUG] Parsing {len(lines)} lines for productive tasks")
-            print(f"[DEBUG] Raw input: {repr(productive_tasks_text[:200])}")
             logger.info(f"Parsing {len(lines)} lines for productive tasks")
             
             for line in lines:
                 task_name = line.strip()
                 if task_name:
-                    print(f"[DEBUG] Processing productive task: '{task_name}'")
                     logger.info(f"Processing productive task: '{task_name}'")
                     new_task_names.add(task_name)
                     try:
@@ -1310,12 +1508,6 @@ def save_master_data(request):
                         # If not found, try case-insensitive match
                         if not existing_task:
                             existing_task = Task.objects.filter(name__iexact=task_name).first()
-                            if existing_task:
-                                print(f"[DEBUG] Found task with case-insensitive match: '{existing_task.name}' (input was '{task_name}')")
-                        
-                        print(f"[DEBUG] Task '{task_name}' exists: {existing_task is not None}")
-                        if existing_task:
-                            print(f"[DEBUG] Existing task '{existing_task.name}': is_non_productive={existing_task.is_non_productive}, is_active={existing_task.is_active}")
                         
                         if existing_task:
                             # Task exists - update it to be productive and active
@@ -1325,7 +1517,6 @@ def save_master_data(request):
                             existing_task.is_non_productive = False
                             existing_task.is_active = True
                             existing_task.save()
-                            print(f"[DEBUG] Task '{existing_task.name}' (matched '{task_name}'): updated (was is_non_productive={was_non_prod})")
                             logger.info(f"Task '{existing_task.name}' (matched '{task_name}'): updated (was is_non_productive={was_non_prod})")
                             # Update the set with the actual name from DB (in case of case difference)
                             new_task_names.discard(task_name)
@@ -1337,25 +1528,14 @@ def save_master_data(request):
                                 is_non_productive=False,
                                 is_active=True
                             )
-                            print(f"[DEBUG] Task '{task_name}': created")
                             logger.info(f"Task '{task_name}': created")
                     except Exception as e:
-                        print(f"[ERROR] Error saving task '{task_name}': {e}")
-                        import traceback
-                        traceback.print_exc()
                         logger.error(f"Error saving task '{task_name}': {e}", exc_info=True)
             
-            print(f"[DEBUG] Total productive tasks to keep active: {len(new_task_names)}")
-            print(f"[DEBUG] Task names: {list(new_task_names)}")
             logger.info(f"Total productive tasks to keep active: {len(new_task_names)}")
             # Deactivate productive tasks not in the new list
             deactivated = Task.objects.filter(is_non_productive=False).exclude(name__in=new_task_names).update(is_active=False)
-            print(f"[DEBUG] Deactivated {deactivated} productive tasks not in new list")
             logger.info(f"Deactivated {deactivated} productive tasks not in new list")
-            
-            # Debug: Show all productive tasks in DB
-            all_prod_tasks = Task.objects.filter(is_non_productive=False)
-            print(f"[DEBUG] All productive tasks in DB after save: {[(t.name, t.is_active) for t in all_prod_tasks]}")
         
         # Parse and save non-productive tasks (format: Name per line)
         # IMPORTANT: Skip any tasks that are in the productive list to prevent conflicts
@@ -1364,8 +1544,6 @@ def save_master_data(request):
             
             # Use splitlines() to handle all line ending types (\n, \r\n, \r)
             lines = non_productive_tasks_text.splitlines()
-            print(f"[DEBUG] Parsing {len(lines)} lines for non-productive tasks")
-            print(f"[DEBUG] Productive task names to exclude: {productive_task_names}")
             logger.info(f"Parsing {len(lines)} lines for non-productive tasks")
             
             for line in lines:
@@ -1373,11 +1551,9 @@ def save_master_data(request):
                 if task_name:
                     # Skip if this task is marked as productive
                     if task_name in productive_task_names:
-                        print(f"[DEBUG] Skipping '{task_name}' - it's in productive tasks list")
                         logger.info(f"Skipping '{task_name}' - it's in productive tasks list")
                         continue
                     
-                    print(f"[DEBUG] Processing non-productive task: '{task_name}'")
                     logger.info(f"Processing non-productive task: '{task_name}'")
                     new_task_names.add(task_name)
                     try:
@@ -1386,12 +1562,6 @@ def save_master_data(request):
                         # If not found, try case-insensitive match
                         if not existing_task:
                             existing_task = Task.objects.filter(name__iexact=task_name).first()
-                            if existing_task:
-                                print(f"[DEBUG] Found task with case-insensitive match: '{existing_task.name}' (input was '{task_name}')")
-                        
-                        print(f"[DEBUG] Task '{task_name}' exists: {existing_task is not None}")
-                        if existing_task:
-                            print(f"[DEBUG] Existing task '{existing_task.name}': is_non_productive={existing_task.is_non_productive}, is_active={existing_task.is_active}")
                         
                         if existing_task:
                             # Task exists - update it to be non-productive and active
@@ -1399,7 +1569,6 @@ def save_master_data(request):
                             existing_task.is_non_productive = True
                             existing_task.is_active = True
                             existing_task.save()
-                            print(f"[DEBUG] Task '{existing_task.name}' (matched '{task_name}'): updated (was is_non_productive={was_non_prod})")
                             logger.info(f"Task '{existing_task.name}' (matched '{task_name}'): updated (was is_non_productive={was_non_prod})")
                             # Update the set with the actual name from DB (in case of case difference)
                             new_task_names.discard(task_name)
@@ -1411,19 +1580,13 @@ def save_master_data(request):
                                 is_non_productive=True,
                                 is_active=True
                             )
-                            print(f"[DEBUG] Task '{task_name}': created")
                             logger.info(f"Task '{task_name}': created")
                     except Exception as e:
-                        print(f"[ERROR] Error saving task '{task_name}': {e}")
-                        import traceback
-                        traceback.print_exc()
                         logger.error(f"Error saving task '{task_name}': {e}", exc_info=True)
             
-            print(f"[DEBUG] Total non-productive tasks to keep active: {len(new_task_names)}")
             logger.info(f"Total non-productive tasks to keep active: {len(new_task_names)}")
             # Deactivate non-productive tasks not in the new list (but exclude productive ones)
             deactivated = Task.objects.filter(is_non_productive=True).exclude(name__in=new_task_names).exclude(name__in=productive_task_names).update(is_active=False)
-            print(f"[DEBUG] Deactivated {deactivated} non-productive tasks not in new list")
             logger.info(f"Deactivated {deactivated} non-productive tasks not in new list")
         
         return JsonResponse({
@@ -1551,25 +1714,6 @@ def edit_time_records(request):
         }
         
         records_data.append(record_dict)
-        
-        # Debug: Print first 3 records
-        if len(records_data) <= 3:
-            print(f"\n=== DEBUG Record {len(records_data)} ===")
-            print(f"Record ID: {record.id}")
-            print(f"Start Time (DB): {record.start_time}")
-            print(f"End Time (DB): {record.end_time}")
-            print(f"Duration Seconds (DB): {record.duration_seconds}")
-            print(f"Calculated Hours: {calculated_hours}")
-            print(f"Duration Hours (final): {duration_hours}")
-            print(f"Record Dict: {json.dumps(record_dict, indent=2, default=str)}")
-            logger.info(f"Record {len(records_data)} - duration_hours: {duration_hours}, calculated_hours: {calculated_hours}, duration_seconds: {duration_seconds}")
-    
-    # Debug: Print summary
-    print(f"\n=== DEBUG Summary ===")
-    print(f"Total records: {len(records_data)}")
-    print(f"Sample records_data (first 3):")
-    for i, rec in enumerate(records_data[:3], 1):
-        print(f"  Record {i}: duration_hours={rec['duration_hours']}, calculated_hours={rec['calculated_hours']}, duration_seconds={rec['duration_seconds']}")
     
     # Calculate totals
     total_hours = sum(rec['duration_hours'] for rec in records_data)
@@ -1604,7 +1748,7 @@ def edit_time_records(request):
     })
 
 
-@login_required
+@admin_required
 def save_time_record(request):
     """Save updated time record - handles all editable fields"""
     if request.method != 'POST':
@@ -1746,7 +1890,7 @@ def save_time_record(request):
         }, status=500, json_dumps_params={'ensure_ascii': False})
 
 
-@login_required
+@admin_required
 def delete_time_record(request):
     """Delete a time record"""
     if request.method != 'POST':
@@ -1793,7 +1937,7 @@ def delete_time_record(request):
         }, status=500, json_dumps_params={'ensure_ascii': False})
 
 
-@login_required
+@admin_required
 def bulk_save_time_records(request):
     """Bulk save/update/delete time records"""
     if request.method != 'POST':
@@ -2005,7 +2149,7 @@ def bulk_save_time_records(request):
         }, status=500, json_dumps_params={'ensure_ascii': False})
 
 
-@login_required
+@admin_required
 def create_time_record(request):
     """Create a new time record"""
     if request.method != 'POST':

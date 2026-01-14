@@ -14,10 +14,16 @@ DB_PORT=5432
 # Example: C:\Users\YourName\OneDrive - CompanyName\sites\SiteName\...\file.xlsx
 EXCEL_FILE_PATH=C:\Users\admsoc\Desktop\LoadingTimesheet\django_app\TimesheetSystem.xlsx
 
-# Admin Login Credentials
-# Set these to secure values in production!
-ADMIN_USERNAME=admin
-ADMIN_PASSWORD=admin
+# User Management
+# Users are managed through Django Admin at /admin/
+# Create a superuser first: python manage.py createsuperuser
+# Then login to /admin/ and create user accounts there
+# 
+# Optional: Use create_users command for initial setup only
+# ADMIN_USERNAME=admin
+# ADMIN_PASSWORD=admin
+# REGULAR_USERNAME=user
+# REGULAR_PASSWORD=user
 
 # CSRF Trusted Origins (required for HTTPS)
 # Comma-separated list of trusted origins for CSRF protection
