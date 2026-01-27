@@ -54,7 +54,7 @@
         </div>
     </div>
 
-    <form id="masterDataForm" class="space-y-6">
+    <form id="masterDataForm" class="space-y-6" accept-charset="UTF-8">
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <!-- Employees Section -->
             <div class="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm hover:shadow-lg hover:border-blue-200 transition-all duration-200">
@@ -214,7 +214,8 @@
                         name="non_productive_tasks" 
                         rows="7" 
                         class="w-full p-4 border-2 border-slate-300 rounded-xl font-mono text-sm focus:ring-2 focus:ring-accent-primary focus:border-accent-primary transition-all resize-none shadow-sm"
-                        placeholder="CLEANING&#10;SCRAP&#10;HANDLING&#10;TRANSPORT">{{ non_productive_tasks_text }}</textarea>
+                        placeholder="CLEANING&#10;SCRAP&#10;HANDLING&#10;TRANSPORT&#10;VYKLÁDKA"
+                        spellcheck="false">{{ non_productive_tasks_text }}</textarea>
                     <p class="mt-2 text-xs text-slate-500 flex items-center gap-1">
                         <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
@@ -266,49 +267,59 @@ document.getElementById('masterDataForm').addEventListener('submit', function(e)
         method: 'POST',
         headers: {
             'X-CSRFToken': getCSRFToken(),
+            'Accept': 'application/json',
         },
         body: formData,
         credentials: 'same-origin',
     })
-    .then(response => response.json())
+    .then(response => {
+        if (!response.ok) {
+            return response.text().then(text => {
+                try {
+                    return JSON.parse(text);
+                } catch {
+                    return { success: false, error: `HTTP ${response.status}: ${text.substring(0, 200)}` };
+                }
+            });
+        }
+        return response.json();
+    })
     .then(data => {
         if (data.success) {
             message.textContent = data.message || 'Data saved successfully!';
             message.className = 'mt-2 text-sm text-center text-green-600 font-medium';
             message.classList.remove('hidden');
             
-            // Show success icon
             icon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>';
             icon.classList.remove('animate-spin');
             
-            // Refresh page after a short delay to show success message
             setTimeout(() => {
                 window.location.href = '{% url "admin_control_panel" %}';
             }, 1000);
         } else {
-            message.textContent = data.error || 'Error saving data';
+            const errorMsg = data.error || 'Error saving data';
+            message.textContent = errorMsg;
             message.className = 'mt-2 text-sm text-center text-red-600 font-medium';
             message.classList.remove('hidden');
+            console.error('Save error:', errorMsg);
             
-            // Reset icon
             icon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>';
             icon.classList.remove('animate-spin');
             
-            // Re-enable button on error
             button.disabled = false;
             text.textContent = 'Save Changes';
         }
     })
     .catch(error => {
-        message.textContent = 'Error saving: ' + error.message;
+        const errorMsg = 'Error saving: ' + error.message;
+        message.textContent = errorMsg;
         message.className = 'mt-2 text-sm text-center text-red-600 font-medium';
         message.classList.remove('hidden');
+        console.error('Fetch error:', error);
         
-        // Reset icon
         icon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>';
         icon.classList.remove('animate-spin');
         
-        // Re-enable button on error
         button.disabled = false;
         text.textContent = 'Save Changes';
     });

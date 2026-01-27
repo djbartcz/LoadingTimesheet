@@ -118,6 +118,9 @@ if not db_url:
                 'PASSWORD': db_password,
                 'HOST': db_host,
                 'PORT': db_port,
+                'OPTIONS': {
+                    'client_encoding': 'UTF8',
+                },
             }
         }
     else:

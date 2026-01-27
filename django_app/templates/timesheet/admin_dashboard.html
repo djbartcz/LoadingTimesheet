@@ -237,47 +237,122 @@
 
         <!-- Projects Table -->
         <div class="bg-white border border-slate-200 rounded-lg p-4 shadow-sm">
-            <h2 class="text-sm font-semibold mb-3 text-slate-900 flex items-center gap-2">
-                <svg class="w-4 h-4 text-accent-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path>
-                </svg>
-                Projects ({{ stats_per_project|length }})
-            </h2>
-            <div class="overflow-x-auto">
-                <table class="w-full text-xs">
-                    <thead>
-                        <tr class="border-b border-slate-200">
-                            <th class="text-left py-2 px-2 font-semibold text-slate-600">Project</th>
-                            <th class="text-right py-2 px-2 font-semibold text-slate-600">Hours</th>
-                            <th class="text-right py-2 px-2 font-semibold text-slate-600">Records</th>
-                            <th class="text-right py-2 px-2 font-semibold text-slate-600">Employees</th>
-                        </tr>
-                    </thead>
-                    <tbody>
+            <div class="flex items-center justify-between mb-3">
+                <h2 class="text-sm font-semibold text-slate-900 flex items-center gap-2">
+                    <svg class="w-4 h-4 text-accent-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path>
+                    </svg>
+                    Projects & BOMs
+                </h2>
+                <div class="flex items-center gap-2">
+                    <select id="projectFilter" class="text-xs border border-slate-300 rounded px-2 py-1 bg-white focus:outline-none focus:ring-2 focus:ring-accent-primary">
+                        <option value="">All Projects</option>
                         {% for proj in stats_per_project %}
-                        <tr class="border-b border-slate-100 hover:bg-slate-50 transition-colors">
-                            <td class="py-2 px-2">
-                                <div class="font-medium text-slate-900">{{ proj.name|truncatewords:3 }}</div>
-                            </td>
-                            <td class="py-2 px-2 text-right font-semibold text-slate-700">
-                                {{ proj.hours|floatformat:1 }}h
-                            </td>
-                            <td class="py-2 px-2 text-right text-slate-600">
-                                {{ proj.records }}
-                            </td>
-                            <td class="py-2 px-2 text-right text-slate-600">
-                                {{ proj.employee_count }}
-                            </td>
-                        </tr>
-                        {% empty %}
-                        <tr>
-                            <td colspan="4" class="py-4 text-center text-slate-500">No projects found</td>
-                        </tr>
+                        <option value="{{ proj.description|escapejs }}">{{ proj.description|truncatewords:5 }}</option>
                         {% endfor %}
-                    </tbody>
-                </table>
+                    </select>
+                </div>
+            </div>
+            <div id="projectStatsContainer">
+                <div id="filteredProjectsTotal" class="mb-2 p-2 bg-blue-50 border border-blue-200 rounded text-xs font-semibold text-slate-700 hidden">
+                    <span id="selectedProjectsText"></span> - Total: <span id="selectedProjectsHours" class="text-accent-primary">0</span>h
+                </div>
+                <div class="overflow-x-auto max-h-96 overflow-y-auto">
+                    <table class="w-full text-xs">
+                        <thead class="sticky top-0 bg-white">
+                            <tr class="border-b border-slate-200">
+                                <th class="text-left py-2 px-2 font-semibold text-slate-600">Project</th>
+                                <th class="text-left py-2 px-2 font-semibold text-slate-600">BOM</th>
+                                <th class="text-right py-2 px-2 font-semibold text-slate-600">Hours</th>
+                                <th class="text-right py-2 px-2 font-semibold text-slate-600">Records</th>
+                                <th class="text-right py-2 px-2 font-semibold text-slate-600">Employees</th>
+                            </tr>
+                        </thead>
+                        <tbody id="projectsTableBody">
+                            {% for proj in stats_per_project %}
+                            <tr class="project-row border-b border-slate-100" data-project="{{ proj.description|escapejs }}">
+                                <td class="py-2 px-2 font-semibold text-slate-900 bg-slate-50" colspan="5">
+                                    {{ proj.description|truncatewords:5 }} 
+                                    <span class="text-slate-500 font-normal">(Total: {{ proj.total_hours|floatformat:1 }}h, {{ proj.total_records }} records)</span>
+                                </td>
+                            </tr>
+                            {% for bom in proj.boms %}
+                            <tr class="bom-row border-b border-slate-100 hover:bg-slate-50 transition-colors" data-project="{{ proj.description|escapejs }}">
+                                <td class="py-2 px-2"></td>
+                                <td class="py-2 px-2">
+                                    <div class="font-medium text-slate-700">{{ bom.bom }}</div>
+                                </td>
+                                <td class="py-2 px-2 text-right font-semibold text-slate-700">
+                                    {{ bom.hours|floatformat:1 }}h
+                                </td>
+                                <td class="py-2 px-2 text-right text-slate-600">
+                                    {{ bom.records }}
+                                </td>
+                                <td class="py-2 px-2 text-right text-slate-600">
+                                    {{ bom.employee_count }}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                            {% empty %}
+                            <tr>
+                                <td colspan="5" class="py-4 text-center text-slate-500">No projects found</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </div>
+        
+        <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const filterSelect = document.getElementById('projectFilter');
+            const tableBody = document.getElementById('projectsTableBody');
+            const filteredTotal = document.getElementById('filteredProjectsTotal');
+            const selectedProjectsText = document.getElementById('selectedProjectsText');
+            const selectedProjectsHours = document.getElementById('selectedProjectsHours');
+            
+            const projectData = {
+                {% for proj in stats_per_project %}
+                "{{ proj.description|escapejs }}": {
+                    description: "{{ proj.description|escapejs }}",
+                    total_hours: {{ proj.total_hours }},
+                    total_records: {{ proj.total_records }}
+                }{% if not forloop.last %},{% endif %}
+                {% endfor %}
+            };
+            
+            function updateFilter() {
+                const selectedProject = filterSelect.value;
+                const rows = tableBody.querySelectorAll('tr');
+                let totalHours = 0;
+                let selectedProjects = [];
+                
+                rows.forEach(row => {
+                    const projectName = row.getAttribute('data-project');
+                    if (!selectedProject || projectName === selectedProject) {
+                        row.style.display = '';
+                        if (row.classList.contains('project-row') && projectName === selectedProject) {
+                            selectedProjects.push(projectName);
+                            totalHours += projectData[projectName]?.total_hours || 0;
+                        }
+                    } else {
+                        row.style.display = 'none';
+                    }
+                });
+                
+                if (selectedProject) {
+                    filteredTotal.classList.remove('hidden');
+                    selectedProjectsText.textContent = selectedProjects.length > 0 ? `Selected: ${selectedProjects[0]}` : '';
+                    selectedProjectsHours.textContent = totalHours.toFixed(1);
+                } else {
+                    filteredTotal.classList.add('hidden');
+                }
+            }
+            
+            filterSelect.addEventListener('change', updateFilter);
+        });
+        </script>
     </div>
 </div>
 
@@ -350,10 +425,10 @@ new Chart(document.getElementById('hoursPerPersonChart'), {
 // Hours per Project Chart
 {% if stats_per_project %}
 const hoursPerProjectData = {
-    labels: [{% for proj in stats_per_project %}'{{ proj.name|truncatewords:3|escapejs }}'{% if not forloop.last %},{% endif %}{% endfor %}],
+    labels: [{% for proj in stats_per_project|slice:":15" %}'{{ proj.description|truncatewords:3|escapejs }}'{% if not forloop.last %},{% endif %}{% endfor %}],
     datasets: [{
         label: 'Hours',
-        data: [{% for proj in stats_per_project %}{{ proj.hours }}{% if not forloop.last %},{% endif %}{% endfor %}],
+        data: [{% for proj in stats_per_project|slice:":15" %}{{ proj.total_hours }}{% if not forloop.last %},{% endif %}{% endfor %}],
         backgroundColor: chartColors.success + '80',
         borderColor: chartColors.success,
         borderWidth: 2,
