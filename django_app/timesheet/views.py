@@ -2242,6 +2242,163 @@ def bulk_save_time_records(request):
         }, status=500, json_dumps_params={'ensure_ascii': False})
 
 
+# Daily top-up constants: only top up days with 4h < total < 6.91h to reach 6.91h
+DAILY_MIN_HOURS = 4.0
+DAILY_TARGET_HOURS = 6.91
+
+
+@admin_required
+def topup_preview(request):
+    """Preview which records would get top-up hours to reach 6.91h per day.
+    Applies only to days where employee has more than 4h but less than 6.91h.
+    Remaining hours are split by the percentage each activity already has.
+    """
+    if request.method != 'GET':
+        return JsonResponse({'error': 'Only GET allowed'}, status=405)
+    date_from = request.GET.get('date_from', '')
+    date_to = request.GET.get('date_to', '')
+    employee = request.GET.get('employee', '').strip()
+
+    if not date_from or not date_to:
+        return JsonResponse({
+            'success': False,
+            'error': 'date_from and date_to are required'
+        }, status=400, json_dumps_params={'ensure_ascii': False})
+
+    try:
+        from_date = datetime.strptime(date_from, '%Y-%m-%d').date()
+        to_date = datetime.strptime(date_to, '%Y-%m-%d').date()
+    except ValueError:
+        return JsonResponse({
+            'success': False,
+            'error': 'Invalid date format (use YYYY-MM-DD)'
+        }, status=400, json_dumps_params={'ensure_ascii': False})
+
+    records_query = TimeRecord.objects.filter(
+        end_time__isnull=False,
+        start_time__date__gte=from_date,
+        start_time__date__lte=to_date,
+    )
+    if employee:
+        records_query = records_query.filter(employee_id=employee)
+    records = list(records_query.order_by('employee_id', 'start_time'))
+
+    from collections import defaultdict
+    by_key = defaultdict(list)
+    for r in records:
+        dur_sec = r.duration_seconds or 0
+        if r.start_time and r.end_time and (not r.duration_seconds or r.duration_seconds <= 0):
+            dur_sec = int((r.end_time - r.start_time).total_seconds())
+        hours = dur_sec / 3600.0
+        key = (r.employee_id, r.employee_name, r.start_time.date())
+        by_key[key].append((r, hours))
+
+    suggestions = []
+    for (emp_id, emp_name, d) in sorted(by_key.keys(), key=lambda k: (k[0], k[2])):
+        recs = by_key[(emp_id, emp_name, d)]
+        total = sum(h for _, h in recs)
+        if total <= DAILY_MIN_HOURS or total >= DAILY_TARGET_HOURS:
+            continue
+        remaining = DAILY_TARGET_HOURS - total
+        total_sec = sum(int(round(h * 3600)) for _, h in recs)
+        remaining_sec = int(round(remaining * 3600))
+        if total_sec <= 0:
+            continue
+        assigned = 0
+        for i, (record, rec_hours) in enumerate(recs):
+            rec_sec = int(round(rec_hours * 3600))
+            if i == len(recs) - 1:
+                add_sec = remaining_sec - assigned
+            else:
+                add_sec = int(round(remaining_sec * (rec_sec / total_sec)))
+            assigned += add_sec
+            add_hours = round(add_sec / 3600.0, 2)
+            new_hours = round(rec_hours + add_hours, 2)
+            suggestions.append({
+                'record_id': str(record.id),
+                'employee_id': emp_id,
+                'employee_name': emp_name,
+                'date': d.strftime('%Y-%m-%d'),
+                'task': record.task,
+                'project_name': (record.project_name or '-').strip() or '-',
+                'is_non_productive': record.is_non_productive,
+                'current_hours': round(rec_hours, 2),
+                'add_hours': add_hours,
+                'new_hours': new_hours,
+            })
+
+    employees_affected = len(set(s['employee_id'] for s in suggestions))
+    days_affected = len(set((s['employee_id'], s['date']) for s in suggestions))
+
+    return JsonResponse({
+        'success': True,
+        'suggestions': suggestions,
+        'summary': {
+            'total_records': len(suggestions),
+            'employees_affected': employees_affected,
+            'days_affected': days_affected,
+        },
+    }, json_dumps_params={'ensure_ascii': False})
+
+
+@admin_required
+def topup_apply(request):
+    """Apply top-up hours to the given records (add_hours added to each)."""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'Only POST allowed'}, status=405)
+
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({
+            'success': False,
+            'error': 'Invalid JSON'
+        }, status=400, json_dumps_params={'ensure_ascii': False})
+
+    updates = data.get('updates', [])
+    if not updates:
+        return JsonResponse({
+            'success': False,
+            'error': 'No updates provided'
+        }, status=400, json_dumps_params={'ensure_ascii': False})
+
+    applied = []
+    errors = []
+    with transaction.atomic():
+        for item in updates:
+            rid = item.get('record_id')
+            add_hours = item.get('add_hours', 0)
+            if not rid:
+                errors.append({'record_id': None, 'error': 'Missing record_id'})
+                continue
+            try:
+                add_hours = float(add_hours)
+            except (TypeError, ValueError):
+                errors.append({'record_id': rid, 'error': 'Invalid add_hours'})
+                continue
+            try:
+                record = TimeRecord.objects.get(id=rid)
+            except TimeRecord.DoesNotExist:
+                errors.append({'record_id': rid, 'error': 'Record not found'})
+                continue
+            prev_sec = record.duration_seconds or 0
+            if record.start_time and record.end_time and prev_sec <= 0:
+                prev_sec = int((record.end_time - record.start_time).total_seconds())
+            add_sec = int(round(add_hours * 3600))
+            new_sec = prev_sec + add_sec
+            record.duration_seconds = new_sec
+            record.end_time = record.start_time + timedelta(seconds=new_sec)
+            record.save()
+            applied.append(rid)
+
+    return JsonResponse({
+        'success': True,
+        'message': f'Updated {len(applied)} record(s).',
+        'updated': applied,
+        'errors': errors,
+    }, json_dumps_params={'ensure_ascii': False})
+
+
 @admin_required
 def create_time_record(request):
     """Create a new time record"""

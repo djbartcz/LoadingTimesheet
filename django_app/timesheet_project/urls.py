@@ -23,4 +23,6 @@ urlpatterns = [
     path('edit-records/bulk-save/', views.bulk_save_time_records, name='bulk_save_time_records'),
     path('edit-records/create/', views.create_time_record, name='create_time_record'),
     path('edit-records/delete/', views.delete_time_record, name='delete_time_record'),
+    path('edit-records/topup-preview/', views.topup_preview, name='topup_preview'),
+    path('edit-records/topup-apply/', views.topup_apply, name='topup_apply'),
 ]

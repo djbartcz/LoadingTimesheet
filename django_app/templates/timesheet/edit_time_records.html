@@ -27,7 +27,7 @@
 
     <!-- Filters -->
     <div class="mb-3 bg-white border border-slate-200 rounded-lg p-3 shadow-sm">
-        <form method="GET" action="{% url 'edit_time_records' %}" class="grid grid-cols-1 md:grid-cols-4 gap-3">
+        <form id="editRecordsFilterForm" method="GET" action="{% url 'edit_time_records' %}" class="grid grid-cols-1 md:grid-cols-4 gap-3">
             <div>
                 <label class="block text-[10px] font-semibold text-slate-700 mb-1 uppercase tracking-wide">Employee</label>
                 <select name="employee" class="w-full p-2 border-2 border-slate-300 rounded-lg focus:ring-2 focus:ring-accent-primary focus:border-accent-primary text-sm">
@@ -73,6 +73,16 @@
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
                     </svg>
                     Add New Record
+                </button>
+                <button 
+                    type="button"
+                    onclick="openTopupModal()"
+                    class="px-4 py-2 bg-amber-600 text-white rounded-lg text-sm font-semibold hover:bg-amber-700 transition-colors flex items-center gap-1.5"
+                    title="Suggest adding hours so days with 4–6.91h reach 6.91h, split by activity share">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                    </svg>
+                    Top-up to 6.91h
                 </button>
                 <button 
                     id="saveAllButton"
@@ -165,6 +175,51 @@
                         </button>
                     </div>
                 </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Top-up to 6.91h Modal -->
+    <div id="topupModal" class="fixed inset-0 bg-black bg-opacity-50 z-50 hidden flex items-center justify-center">
+        <div class="bg-white rounded-xl shadow-xl max-w-4xl w-full mx-4 max-h-[90vh] overflow-hidden flex flex-col">
+            <div class="p-6 border-b border-slate-200">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <h2 class="text-xl font-bold text-slate-900">Top-up to 6.91h per day</h2>
+                        <p class="text-sm text-slate-600 mt-1">Days with 4–6.91 hours get the remaining hours split by each activity’s share. &lt;4h or ≥6.91h are unchanged.</p>
+                    </div>
+                    <button type="button" onclick="closeTopupModal()" class="text-slate-400 hover:text-slate-600">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                    </button>
+                </div>
+            </div>
+            <div id="topupContent" class="p-6 overflow-y-auto flex-1">
+                <div id="topupLoading" class="text-center py-8 text-slate-500">Loading…</div>
+                <div id="topupEmpty" class="hidden text-center py-8 text-slate-600">No records need top-up in the current filter (4h &lt; total &lt; 6.91h).</div>
+                <div id="topupTableWrap" class="hidden">
+                    <p id="topupSummary" class="text-sm text-slate-600 mb-3"></p>
+                    <div class="overflow-x-auto border border-slate-200 rounded-lg">
+                        <table class="w-full text-sm">
+                            <thead class="bg-slate-50 border-b border-slate-200">
+                                <tr>
+                                    <th class="px-2 py-2 text-left text-xs font-semibold text-slate-700 uppercase">Employee</th>
+                                    <th class="px-2 py-2 text-left text-xs font-semibold text-slate-700 uppercase">Date</th>
+                                    <th class="px-2 py-2 text-left text-xs font-semibold text-slate-700 uppercase">Task</th>
+                                    <th class="px-2 py-2 text-left text-xs font-semibold text-slate-700 uppercase">Project</th>
+                                    <th class="px-2 py-2 text-left text-xs font-semibold text-slate-700 uppercase">Type</th>
+                                    <th class="px-2 py-2 text-right text-xs font-semibold text-slate-700 uppercase">Current</th>
+                                    <th class="px-2 py-2 text-right text-xs font-semibold text-slate-700 uppercase">Add</th>
+                                    <th class="px-2 py-2 text-right text-xs font-semibold text-slate-700 uppercase">New</th>
+                                </tr>
+                            </thead>
+                            <tbody id="topupTableBody" class="divide-y divide-slate-200"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            <div id="topupFooter" class="p-6 border-t border-slate-200 hidden flex gap-3 justify-end">
+                <button type="button" onclick="closeTopupModal()" class="px-6 py-2.5 bg-slate-200 text-slate-700 rounded-lg font-semibold hover:bg-slate-300 transition-colors">Cancel</button>
+                <button type="button" id="topupApplyBtn" onclick="applyTopup()" class="px-6 py-2.5 bg-amber-600 text-white rounded-lg font-semibold hover:bg-amber-700 transition-colors">Apply</button>
             </div>
         </div>
     </div>
@@ -1006,6 +1061,111 @@ function closeAddRecordModal() {
     }
 }
 
+// Top-up to 6.91h modal
+let topupSuggestions = [];
+
+function openTopupModal() {
+    const modal = document.getElementById('topupModal');
+    if (!modal) return;
+    const form = document.getElementById('editRecordsFilterForm');
+    const dateFrom = form ? form.querySelector('input[name="date_from"]').value : '';
+    const dateTo = form ? form.querySelector('input[name="date_to"]').value : '';
+    const employee = form ? (form.querySelector('select[name="employee"]') || {}).value || '' : '';
+    if (!dateFrom || !dateTo) {
+        alert('Please set Date From and Date To in the filters.');
+        return;
+    }
+    modal.classList.remove('hidden');
+    document.getElementById('topupLoading').classList.remove('hidden');
+    document.getElementById('topupEmpty').classList.add('hidden');
+    document.getElementById('topupTableWrap').classList.add('hidden');
+    document.getElementById('topupFooter').classList.add('hidden');
+    const params = new URLSearchParams({ date_from: dateFrom, date_to: dateTo });
+    if (employee) params.set('employee', employee);
+    fetch('{% url "topup_preview" %}' + '?' + params.toString(), { method: 'GET', credentials: 'same-origin' })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            document.getElementById('topupLoading').classList.add('hidden');
+            if (!data.success) {
+                document.getElementById('topupEmpty').classList.remove('hidden');
+                document.getElementById('topupEmpty').textContent = data.error || 'Failed to load preview.';
+                return;
+            }
+            topupSuggestions = data.suggestions || [];
+            if (topupSuggestions.length === 0) {
+                document.getElementById('topupEmpty').classList.remove('hidden');
+                return;
+            }
+            const s = data.summary || {};
+            document.getElementById('topupSummary').textContent =
+                (s.employees_affected || 0) + ' employee(s), ' + (s.days_affected || 0) + ' day(s), ' + topupSuggestions.length + ' record(s) to update.';
+            const tbody = document.getElementById('topupTableBody');
+            tbody.innerHTML = '';
+            topupSuggestions.forEach(function(row) {
+                const tr = document.createElement('tr');
+                function addCell(text, cls, isHtml) {
+                    const td = document.createElement('td');
+                    td.className = cls || 'px-2 py-1.5';
+                    if (isHtml) td.innerHTML = text; else td.textContent = text || '';
+                    tr.appendChild(td);
+                }
+                addCell(row.employee_name, 'px-2 py-1.5');
+                addCell(row.date, 'px-2 py-1.5');
+                addCell(row.task, 'px-2 py-1.5');
+                addCell(row.project_name || '-', 'px-2 py-1.5');
+                var typeHtml = '<span class="px-1.5 py-0.5 rounded text-[10px] font-semibold ' + (row.is_non_productive ? 'bg-orange-100 text-orange-700' : 'bg-green-100 text-green-700') + '">' + (row.is_non_productive ? 'Non-Prod' : 'Productive') + '</span>';
+                addCell(typeHtml, 'px-2 py-1.5', true);
+                addCell(Number(row.current_hours).toFixed(2), 'px-2 py-1.5 text-right');
+                addCell('+' + Number(row.add_hours).toFixed(2), 'px-2 py-1.5 text-right text-amber-700 font-medium');
+                addCell(Number(row.new_hours).toFixed(2), 'px-2 py-1.5 text-right font-semibold');
+                tbody.appendChild(tr);
+            });
+            document.getElementById('topupTableWrap').classList.remove('hidden');
+            document.getElementById('topupFooter').classList.remove('hidden');
+        })
+        .catch(function(err) {
+            document.getElementById('topupLoading').classList.add('hidden');
+            document.getElementById('topupEmpty').classList.remove('hidden');
+            document.getElementById('topupEmpty').textContent = 'Error: ' + (err.message || 'Could not load preview.');
+        });
+}
+
+function closeTopupModal() {
+    const modal = document.getElementById('topupModal');
+    if (modal) modal.classList.add('hidden');
+}
+
+function applyTopup() {
+    if (!topupSuggestions.length) return;
+    const btn = document.getElementById('topupApplyBtn');
+    const orig = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Applying…';
+    const updates = topupSuggestions.map(function(s) { return { record_id: s.record_id, add_hours: s.add_hours }; });
+    fetch('{% url "topup_apply" %}', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCSRFToken() },
+        body: JSON.stringify({ updates: updates }),
+        credentials: 'same-origin'
+    })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.success) {
+                closeTopupModal();
+                window.location.reload();
+            } else {
+                alert('Error: ' + (data.error || 'Apply failed.'));
+                btn.disabled = false;
+                btn.textContent = orig;
+            }
+        })
+        .catch(function(err) {
+            alert('Error: ' + (err.message || 'Request failed.'));
+            btn.disabled = false;
+            btn.textContent = orig;
+        });
+}
+
 // Task options from server
 const productiveTasks = [
     {% for task in productive_tasks %}"{{ task.name|escapejs }}"{% if not forloop.last %}, {% endif %}{% endfor %}
@@ -1110,6 +1270,11 @@ document.getElementById('addRecordForm').addEventListener('submit', function(e) 
 document.getElementById('addRecordModal').addEventListener('click', function(e) {
     if (e.target === this) {
         closeAddRecordModal();
+    }
+});
+document.getElementById('topupModal').addEventListener('click', function(e) {
+    if (e.target === this) {
+        closeTopupModal();
     }
 });
 </script>
