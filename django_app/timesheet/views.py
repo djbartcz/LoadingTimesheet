@@ -2297,7 +2297,9 @@ def topup_preview(request):
     for (emp_id, emp_name, d) in sorted(by_key.keys(), key=lambda k: (k[0], k[2])):
         recs = by_key[(emp_id, emp_name, d)]
         total = sum(h for _, h in recs)
-        if total <= DAILY_MIN_HOURS or total >= DAILY_TARGET_HOURS:
+        # Use rounded total so 6.909999... (float) is treated as 6.91 and skipped
+        total_rounded = round(total, 2)
+        if total_rounded <= DAILY_MIN_HOURS or total_rounded >= DAILY_TARGET_HOURS:
             continue
         remaining = DAILY_TARGET_HOURS - total
         total_sec = sum(int(round(h * 3600)) for _, h in recs)
