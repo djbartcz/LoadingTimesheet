@@ -7,324 +7,114 @@
 
 {% block content %}
 <div class="min-h-screen px-4 py-6 max-w-7xl mx-auto">
-    <!-- Header -->
     <div class="flex items-center gap-3 mb-6">
         <a href="{% url 'admin_dashboard' %}" class="text-accent-primary text-base font-medium hover:text-accent-secondary transition-colors flex items-center gap-1">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
-            </svg>
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path></svg>
             Back
         </a>
-        <h1 class="flex-1 flex items-center gap-3 font-grotesk text-2xl font-bold text-slate-900">
-            <div class="p-2 bg-accent-primary/10 rounded-lg">
-                <svg class="w-6 h-6 text-accent-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
-                </svg>
-            </div>
-            Administration - Data Management
-        </h1>
+        <h1 class="flex-1 font-grotesk text-2xl font-bold text-slate-900">Administration - IFS Master Data</h1>
+        <button id="saveMappingButton" type="button" class="bg-emerald-600 text-white rounded-lg px-4 py-2 text-sm font-semibold hover:bg-emerald-700 transition-colors">Save Translations</button>
+        <button id="refreshIFSButton" type="button" class="bg-accent-primary text-white rounded-lg px-4 py-2 text-sm font-semibold hover:bg-accent-secondary transition-colors flex items-center gap-2">
+            <svg id="refreshIFSIcon" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+            <span id="refreshIFSText">Refresh from IFS</span>
+        </button>
     </div>
 
-    <!-- Info Box -->
-    <div class="mb-6 p-5 bg-gradient-to-r from-blue-50 via-indigo-50 to-purple-50 border-l-4 border-accent-primary rounded-xl shadow-sm">
-        <div class="flex items-start gap-3">
-            <div class="p-2 bg-accent-primary/10 rounded-lg flex-shrink-0">
-                <svg class="w-5 h-5 text-accent-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                </svg>
+    <div id="statusMessage" class="mb-4 text-sm text-center hidden"></div>
+
+    <div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
+        <section class="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
+            <div class="flex items-center justify-between mb-3">
+                <h2 class="text-lg font-bold text-slate-800">Employees</h2>
+                <span class="text-xs px-2 py-1 rounded-full bg-blue-100 text-blue-700">Active: {{ employees_count }}</span>
             </div>
-            <div class="flex-1">
-                <p class="font-bold text-slate-800 mb-3 text-base">Input Data Format:</p>
-                <ul class="text-sm text-slate-700 space-y-2">
-                    <li class="flex items-start gap-2.5">
-                        <span class="text-accent-primary mt-1 font-bold">•</span>
-                        <span><strong class="text-slate-800">Employees and Projects:</strong> ID [TAB] Name (each line = one record)</span>
-                    </li>
-                    <li class="flex items-start gap-2.5">
-                        <span class="text-accent-primary mt-1 font-bold">•</span>
-                        <span><strong class="text-slate-800">Tasks:</strong> Task name (each line = one task)</span>
-                    </li>
-                    <li class="flex items-start gap-2.5">
-                        <span class="text-accent-primary mt-1 font-bold">•</span>
-                        <span>Removing a record from "New values" will deactivate it (won't show in app), but it stays in the database</span>
-                    </li>
-                </ul>
+            <input id="employeeSearch" type="text" placeholder="Search employee by name or ID..." class="w-full mb-3 p-2.5 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-accent-primary focus:border-accent-primary">
+            <div id="employeeList" class="max-h-80 overflow-y-auto border border-slate-200 rounded-xl p-2 bg-slate-50">
+                {% for emp in all_employees %}
+                <label class="employee-row flex items-center justify-between gap-2 py-1.5 px-2 rounded hover:bg-white" data-search="{{ emp.name|lower }} {{ emp.id|lower }}">
+                    <span class="text-sm text-slate-700">{{ emp.name }} [{{ emp.id }}]</span>
+                    <input type="checkbox" class="employee-active-checkbox h-4 w-4 accent-accent-primary" data-employee-id="{{ emp.id }}" {% if emp.is_active %}checked{% endif %}>
+                </label>
+                {% empty %}
+                <p class="text-sm text-slate-500">No employees loaded yet.</p>
+                {% endfor %}
             </div>
-        </div>
+        </section>
+
+        <section class="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
+            <div class="flex items-center justify-between mb-3">
+                <h2 class="text-lg font-bold text-slate-800">Projects / Job Numbers</h2>
+                <span class="text-xs px-2 py-1 rounded-full bg-purple-100 text-purple-700">Active: {{ projects_count }}</span>
+            </div>
+            <div class="max-h-80 overflow-auto border border-slate-200 rounded-xl">
+                <table class="w-full text-sm">
+                    <thead class="bg-slate-100 sticky top-0">
+                        <tr>
+                            <th class="text-left p-2 font-semibold text-slate-700">Project</th>
+                            <th class="text-left p-2 font-semibold text-slate-700">Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for project in all_projects %}
+                        <tr class="border-t border-slate-200">
+                            <td class="p-2 text-slate-700">{{ project.name }}</td>
+                            <td class="p-2">
+                                {% if project.is_active %}
+                                <span class="text-xs px-2 py-1 rounded-full bg-emerald-100 text-emerald-700">Active</span>
+                                {% else %}
+                                <span class="text-xs px-2 py-1 rounded-full bg-slate-200 text-slate-700">Inactive</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% empty %}
+                        <tr><td colspan="2" class="p-3 text-slate-500">No projects in database.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </section>
     </div>
 
-    <form id="masterDataForm" class="space-y-6" accept-charset="UTF-8">
-        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <!-- Employees Section -->
-            <div class="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm hover:shadow-lg hover:border-blue-200 transition-all duration-200">
-                <div class="flex items-center justify-between mb-4 pb-3 border-b border-slate-200">
-                    <div class="flex items-center gap-2">
-                        <div class="p-2 bg-blue-100 rounded-lg">
-                            <svg class="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path>
-                            </svg>
-                        </div>
-                        <h2 class="text-lg font-bold text-slate-800">Employees</h2>
-                    </div>
-                    <span class="px-3 py-1 bg-blue-100 text-blue-700 text-xs font-semibold rounded-full">Active: {{ employees_count }}</span>
-                </div>
-                
-                <div class="mb-4">
-                    <label class="block text-xs font-semibold text-slate-700 mb-2 uppercase tracking-wide">Current Values</label>
-                    <div class="p-4 bg-gradient-to-br from-slate-50 to-slate-100 border-2 border-slate-200 rounded-xl font-mono text-sm text-slate-700 max-h-48 overflow-y-auto shadow-inner">
-                        {% if employees_text %}
-                            <pre class="whitespace-pre-wrap m-0">{{ employees_text }}</pre>
-                        {% else %}
-                            <span class="text-slate-400 italic">No employees</span>
-                        {% endif %}
-                    </div>
-                </div>
-                
-                <div>
-                    <label class="block text-xs font-semibold text-slate-700 mb-2 uppercase tracking-wide">New Values</label>
-                    <textarea 
-                        id="employees" 
-                        name="employees" 
-                        rows="7" 
-                        class="w-full p-4 border-2 border-slate-300 rounded-xl font-mono text-sm focus:ring-2 focus:ring-accent-primary focus:border-accent-primary transition-all resize-none shadow-sm"
-                        placeholder="ID&#9;Name&#10;E001&#9;John Doe&#10;E002&#9;Jane Smith">{{ employees_text }}</textarea>
-                    <p class="mt-2 text-xs text-slate-500 flex items-center gap-1">
-                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                        </svg>
-                        Format: ID [TAB] Name
-                    </p>
-                </div>
-            </div>
-
-            <!-- Projects Section -->
-            <div class="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm hover:shadow-md transition-shadow">
-                <div class="flex items-center justify-between mb-4 pb-3 border-b border-slate-200">
-                    <div class="flex items-center gap-2">
-                        <div class="p-2 bg-purple-100 rounded-lg">
-                            <svg class="w-5 h-5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
-                            </svg>
-                        </div>
-                        <h2 class="text-lg font-bold text-slate-800">Projects / Job Numbers</h2>
-                    </div>
-                    <span class="px-3 py-1 bg-purple-100 text-purple-700 text-xs font-semibold rounded-full">Active: {{ projects_count }}</span>
-                </div>
-                
-                <div class="mb-4">
-                    <label class="block text-xs font-semibold text-slate-700 mb-2 uppercase tracking-wide">Current Values</label>
-                    <div class="p-4 bg-gradient-to-br from-slate-50 to-slate-100 border-2 border-slate-200 rounded-xl font-mono text-sm text-slate-700 max-h-48 overflow-y-auto shadow-inner">
-                        {% if projects_text %}
-                            <pre class="whitespace-pre-wrap m-0">{{ projects_text }}</pre>
-                        {% else %}
-                            <span class="text-slate-400 italic">No projects</span>
-                        {% endif %}
-                    </div>
-                </div>
-                
-                <div>
-                    <label class="block text-xs font-semibold text-slate-700 mb-2 uppercase tracking-wide">New Values</label>
-                    <textarea 
-                        id="projects" 
-                        name="projects" 
-                        rows="7" 
-                        class="w-full p-4 border-2 border-slate-300 rounded-xl font-mono text-sm focus:ring-2 focus:ring-accent-primary focus:border-accent-primary transition-all resize-none shadow-sm"
-                        placeholder="ID&#9;Project Name&#10;P001&#9;Project Alpha&#10;P002&#9;Project Beta">{{ projects_text }}</textarea>
-                    <p class="mt-2 text-xs text-slate-500 flex items-center gap-1">
-                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                        </svg>
-                        Format: ID [TAB] Name
-                    </p>
-                </div>
-            </div>
-
-            <!-- Productive Tasks Section -->
-            <div class="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm hover:shadow-lg hover:border-green-200 transition-all duration-200">
-                <div class="flex items-center justify-between mb-4 pb-3 border-b border-slate-200">
-                    <div class="flex items-center gap-2">
-                        <div class="p-2 bg-green-100 rounded-lg">
-                            <svg class="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                            </svg>
-                        </div>
-                        <h2 class="text-lg font-bold text-slate-800">Productive Tasks</h2>
-                    </div>
-                    <span class="px-3 py-1 bg-green-100 text-green-700 text-xs font-semibold rounded-full">Active: {{ productive_tasks_count }}</span>
-                </div>
-                
-                <div class="mb-4">
-                    <label class="block text-xs font-semibold text-slate-700 mb-2 uppercase tracking-wide">Current Values</label>
-                    <div class="p-4 bg-gradient-to-br from-slate-50 to-slate-100 border-2 border-slate-200 rounded-xl font-mono text-sm text-slate-700 max-h-48 overflow-y-auto shadow-inner">
-                        {% if productive_tasks_text %}
-                            <pre class="whitespace-pre-wrap m-0">{{ productive_tasks_text }}</pre>
-                        {% else %}
-                            <span class="text-slate-400 italic">No tasks</span>
-                        {% endif %}
-                    </div>
-                </div>
-                
-                <div>
-                    <label class="block text-xs font-semibold text-slate-700 mb-2 uppercase tracking-wide">New Values</label>
-                    <textarea 
-                        id="productive_tasks" 
-                        name="productive_tasks" 
-                        rows="7" 
-                        class="w-full p-4 border-2 border-slate-300 rounded-xl font-mono text-sm focus:ring-2 focus:ring-accent-primary focus:border-accent-primary transition-all resize-none shadow-sm"
-                        placeholder="LOADING&#10;UNLOADING&#10;PICKING&#10;PACKING&#10;HANDLING">{{ productive_tasks_text }}</textarea>
-                    <p class="mt-2 text-xs text-slate-500 flex items-center gap-1">
-                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                        </svg>
-                        Format: Task name (one per line)
-                    </p>
-                </div>
-            </div>
-
-            <!-- Non-Productive Tasks Section -->
-            <div class="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm hover:shadow-lg hover:border-orange-200 transition-all duration-200">
-                <div class="flex items-center justify-between mb-4 pb-3 border-b border-slate-200">
-                    <div class="flex items-center gap-2">
-                        <div class="p-2 bg-orange-100 rounded-lg">
-                            <svg class="w-5 h-5 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                            </svg>
-                        </div>
-                        <h2 class="text-lg font-bold text-slate-800">Non-Productive Tasks</h2>
-                    </div>
-                    <span class="px-3 py-1 bg-orange-100 text-orange-700 text-xs font-semibold rounded-full">Active: {{ non_productive_tasks_count }}</span>
-                </div>
-                
-                <div class="mb-4">
-                    <label class="block text-xs font-semibold text-slate-700 mb-2 uppercase tracking-wide">Current Values</label>
-                    <div class="p-4 bg-gradient-to-br from-slate-50 to-slate-100 border-2 border-slate-200 rounded-xl font-mono text-sm text-slate-700 max-h-48 overflow-y-auto shadow-inner">
-                        {% if non_productive_tasks_text %}
-                            <pre class="whitespace-pre-wrap m-0">{{ non_productive_tasks_text }}</pre>
-                        {% else %}
-                            <span class="text-slate-400 italic">No tasks</span>
-                        {% endif %}
-                    </div>
-                </div>
-                
-                <div>
-                    <label class="block text-xs font-semibold text-slate-700 mb-2 uppercase tracking-wide">New Values</label>
-                    <textarea 
-                        id="non_productive_tasks" 
-                        name="non_productive_tasks" 
-                        rows="7" 
-                        class="w-full p-4 border-2 border-slate-300 rounded-xl font-mono text-sm focus:ring-2 focus:ring-accent-primary focus:border-accent-primary transition-all resize-none shadow-sm"
-                        placeholder="CLEANING&#10;SCRAP&#10;HANDLING&#10;TRANSPORT&#10;VYKLÁDKA"
-                        spellcheck="false">{{ non_productive_tasks_text }}</textarea>
-                    <p class="mt-2 text-xs text-slate-500 flex items-center gap-1">
-                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                        </svg>
-                        Format: Task name (one per line)
-                    </p>
-                </div>
-            </div>
+    <section class="mt-6 bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
+        <div class="flex items-center justify-between mb-3">
+            <h2 class="text-lg font-bold text-slate-800">Task Translation Mapping</h2>
+            <span class="text-xs px-2 py-1 rounded-full bg-orange-100 text-orange-700">Productive: {{ productive_tasks_count }} | Non-Productive: {{ non_productive_tasks_count }}</span>
         </div>
-
-        <!-- Save Button -->
-        <div class="flex gap-3 pt-4 border-t border-slate-200">
-            <button 
-                type="submit" 
-                id="saveButton"
-                class="flex-1 flex items-center justify-center gap-2 px-8 py-4 bg-gradient-to-r from-accent-primary to-accent-secondary text-white rounded-xl font-semibold hover:shadow-lg hover:scale-[1.02] transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 disabled:hover:shadow-none">
-                <svg id="saveIcon" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
-                </svg>
-                <span id="saveText">Save Changes</span>
-            </button>
+        <div class="overflow-auto border border-slate-200 rounded-xl">
+            <table class="w-full text-sm" id="mappingTable">
+                <thead class="bg-slate-100">
+                    <tr>
+                        <th class="text-left p-2 font-semibold text-slate-700">Report Cost Code</th>
+                        <th class="text-left p-2 font-semibold text-slate-700">Report Cost Name</th>
+                        <th class="text-left p-2 font-semibold text-slate-700">Translation</th>
+                        <th class="text-left p-2 font-semibold text-slate-700">Category</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in mapping_entries %}
+                    <tr class="border-t border-slate-200 mapping-row">
+                        <td class="p-2 font-mono text-xs text-slate-700 mapping-code">{{ row.report_cost_code }}</td>
+                        <td class="p-2 text-slate-700 mapping-report-name">{{ row.report_cost_name }}</td>
+                        <td class="p-2">
+                            <input type="text" class="mapping-activity w-full p-2 border border-slate-300 rounded-lg" value="{{ row.activity_name }}">
+                        </td>
+                        <td class="p-2">
+                            <select class="mapping-category w-full p-2 border border-slate-300 rounded-lg">
+                                <option value="false" {% if not row.is_non_productive %}selected{% endif %}>Productive</option>
+                                <option value="true" {% if row.is_non_productive %}selected{% endif %}>Non-Productive</option>
+                            </select>
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr><td colspan="4" class="p-3 text-slate-500">No mapping rows loaded.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
         </div>
-        
-        <div id="saveMessage" class="mt-3 text-sm text-center hidden"></div>
-    </form>
+    </section>
 </div>
 
 <script>
-document.getElementById('masterDataForm').addEventListener('submit', function(e) {
-    e.preventDefault();
-    
-    const button = document.getElementById('saveButton');
-    const icon = document.getElementById('saveIcon');
-    const text = document.getElementById('saveText');
-    const message = document.getElementById('saveMessage');
-    
-    // Disable button and show loading state
-    button.disabled = true;
-    text.textContent = 'Saving...';
-    message.classList.add('hidden');
-    
-    // Add checkmark animation
-    icon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>';
-    icon.classList.add('animate-spin');
-    
-    const formData = new FormData(this);
-    
-    fetch('{% url "save_master_data" %}', {
-        method: 'POST',
-        headers: {
-            'X-CSRFToken': getCSRFToken(),
-            'Accept': 'application/json',
-        },
-        body: formData,
-        credentials: 'same-origin',
-    })
-    .then(response => {
-        if (!response.ok) {
-            return response.text().then(text => {
-                try {
-                    return JSON.parse(text);
-                } catch {
-                    return { success: false, error: `HTTP ${response.status}: ${text.substring(0, 200)}` };
-                }
-            });
-        }
-        return response.json();
-    })
-    .then(data => {
-        if (data.success) {
-            message.textContent = data.message || 'Data saved successfully!';
-            message.className = 'mt-2 text-sm text-center text-green-600 font-medium';
-            message.classList.remove('hidden');
-            
-            icon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>';
-            icon.classList.remove('animate-spin');
-            
-            setTimeout(() => {
-                window.location.href = '{% url "admin_control_panel" %}';
-            }, 1000);
-        } else {
-            const errorMsg = data.error || 'Error saving data';
-            message.textContent = errorMsg;
-            message.className = 'mt-2 text-sm text-center text-red-600 font-medium';
-            message.classList.remove('hidden');
-            console.error('Save error:', errorMsg);
-            
-            icon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>';
-            icon.classList.remove('animate-spin');
-            
-            button.disabled = false;
-            text.textContent = 'Save Changes';
-        }
-    })
-    .catch(error => {
-        const errorMsg = 'Error saving: ' + error.message;
-        message.textContent = errorMsg;
-        message.className = 'mt-2 text-sm text-center text-red-600 font-medium';
-        message.classList.remove('hidden');
-        console.error('Fetch error:', error);
-        
-        icon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>';
-        icon.classList.remove('animate-spin');
-        
-        button.disabled = false;
-        text.textContent = 'Save Changes';
-    });
-});
-
 function getCookie(name) {
     let cookieValue = null;
     if (document.cookie && document.cookie !== '') {
@@ -342,10 +132,100 @@ function getCookie(name) {
 
 function getCSRFToken() {
     const metaTag = document.querySelector('meta[name=csrf-token]');
-    if (metaTag) {
-        return metaTag.getAttribute('content');
-    }
-    return getCookie('csrftoken');
+    return metaTag ? metaTag.getAttribute('content') : getCookie('csrftoken');
 }
+
+function setStatus(message, isError = false) {
+    const el = document.getElementById('statusMessage');
+    el.textContent = message;
+    el.className = isError
+        ? 'mb-4 text-sm text-center text-red-600 font-medium'
+        : 'mb-4 text-sm text-center text-green-600 font-medium';
+    el.classList.remove('hidden');
+}
+
+document.getElementById('employeeSearch').addEventListener('input', function () {
+    const query = this.value.trim().toLowerCase();
+    document.querySelectorAll('.employee-row').forEach((row) => {
+        const haystack = row.dataset.search || '';
+        row.classList.toggle('hidden', query && !haystack.includes(query));
+    });
+});
+
+document.getElementById('refreshIFSButton').addEventListener('click', function() {
+    const button = document.getElementById('refreshIFSButton');
+    const icon = document.getElementById('refreshIFSIcon');
+    const text = document.getElementById('refreshIFSText');
+    button.disabled = true;
+    icon.classList.add('animate-spin');
+    text.textContent = 'Refreshing...';
+
+    fetch('{% url "refresh_master_data_from_ifs" %}', {
+        method: 'POST',
+        headers: { 'X-CSRFToken': getCSRFToken(), 'Accept': 'application/json' },
+        credentials: 'same-origin',
+    })
+    .then((response) => response.json())
+    .then((data) => {
+        if (!data.success) throw new Error(data.error || 'IFS refresh failed');
+        setStatus(data.message || 'IFS refresh completed.');
+        setTimeout(() => { window.location.href = '{% url "admin_control_panel" %}'; }, 700);
+    })
+    .catch((error) => setStatus(error.message || 'Failed to refresh from IFS.', true))
+    .finally(() => {
+        button.disabled = false;
+        icon.classList.remove('animate-spin');
+        text.textContent = 'Refresh from IFS';
+    });
+});
+
+document.getElementById('saveMappingButton').addEventListener('click', function() {
+    const rows = Array.from(document.querySelectorAll('#mappingTable tbody .mapping-row'));
+    const mappings = rows.map((row) => ({
+        report_cost_code: row.querySelector('.mapping-code').textContent.trim(),
+        report_cost_name: row.querySelector('.mapping-report-name').textContent.trim(),
+        activity_name: row.querySelector('.mapping-activity').value.trim(),
+        is_non_productive: row.querySelector('.mapping-category').value === 'true',
+    }));
+
+    fetch('{% url "save_activity_mapping" %}', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': getCSRFToken(),
+            'Accept': 'application/json',
+        },
+        credentials: 'same-origin',
+        body: JSON.stringify({ mappings }),
+    })
+    .then((response) => response.json())
+    .then((data) => {
+        if (!data.success) throw new Error(data.error || 'Failed to save mapping');
+        setStatus(`Saved ${data.saved_rows || 0} mapping rows.`);
+    })
+    .catch((error) => setStatus(error.message || 'Failed to save mapping.', true));
+});
+
+document.querySelectorAll('.employee-active-checkbox').forEach((checkbox) => {
+    checkbox.addEventListener('change', function() {
+        const employeeId = this.dataset.employeeId;
+        const isActive = this.checked;
+        fetch('{% url "set_employee_active" %}', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': getCSRFToken(),
+                'Accept': 'application/json',
+            },
+            credentials: 'same-origin',
+            body: JSON.stringify({ employee_id: employeeId, is_active: isActive }),
+        })
+        .then((response) => response.json())
+        .then((data) => {
+            if (!data.success) throw new Error(data.error || 'Failed to update employee');
+        })
+        .catch(() => { this.checked = !isActive; setStatus('Failed to update employee.', true); });
+    });
+});
 </script>
 {% endblock %}

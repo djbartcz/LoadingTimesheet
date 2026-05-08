@@ -6,9 +6,11 @@ from datetime import timedelta, datetime
 import logging
 import uuid
 import os
+import re
 from functools import wraps
 import pytz
 import json
+from urllib.parse import quote
 from .models import ActiveTimer, TimeRecord, Employee, Project, Task
 from django.apps import apps
 from openpyxl import Workbook
@@ -17,8 +19,36 @@ from django.db import transaction
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.decorators import login_required as django_login_required
 from django.contrib.auth.models import User, Group
+from .ifs_api_connector import IFSAPIConnector
+from .view_utils import get_non_prod_base_payload, get_prod_base_payload
 
 logger = logging.getLogger(__name__)
+
+
+def load_ifs_activity_mapping():
+    """Load static mapping for IFS report cost codes to UI activity groups."""
+    mapping_file = os.path.join(
+        os.path.dirname(__file__),
+        'ifs_activity_mapping.json',
+    )
+    try:
+        with open(mapping_file, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            return data
+    except Exception as exc:
+        logger.warning("Failed to load IFS activity mapping JSON: %s", exc)
+    return {}
+
+
+def save_ifs_activity_mapping(mapping_data):
+    """Persist IFS activity mapping JSON to disk."""
+    mapping_file = os.path.join(
+        os.path.dirname(__file__),
+        'ifs_activity_mapping.json',
+    )
+    with open(mapping_file, 'w', encoding='utf-8') as f:
+        json.dump(mapping_data, f, ensure_ascii=False, indent=2)
 
 
 def get_excel_timezone():
@@ -265,7 +295,28 @@ def timer_page(request, employee_id):
         ]
         
         db_tasks = Task.objects.filter(is_active=True, is_non_productive=False).order_by('name')
-        tasks = [{"name": task.name} for task in db_tasks]
+        mapping = load_ifs_activity_mapping()
+        task_code_map = {}
+        for code, item in mapping.items():
+            activity_name = str(item.get('activity_name') or '').strip()
+            report_cost_name = str(item.get('report_cost_name') or '').strip()
+            aliases = item.get('activity_aliases') or []
+            if activity_name:
+                task_code_map[activity_name.lower()] = code
+            if report_cost_name:
+                task_code_map[report_cost_name.lower()] = code
+            if isinstance(aliases, list):
+                for alias in aliases:
+                    alias_text = str(alias or '').strip()
+                    if alias_text:
+                        task_code_map[alias_text.lower()] = code
+        tasks = [
+            {
+                "name": task.name,
+                "report_cost_code": task_code_map.get(task.name.lower(), ''),
+            }
+            for task in db_tasks
+        ]
         
         db_non_prod_tasks = Task.objects.filter(is_active=True, is_non_productive=True).order_by('name')
         non_productive_tasks = [{"name": task.name} for task in db_non_prod_tasks]
@@ -372,7 +423,7 @@ def timer_page(request, employee_id):
     return render(request, 'timesheet/timer_page.html', {
         'employee': employee,
         'projects': projects,
-        'tasks': [{'name': t['name']} for t in tasks],
+        'tasks': tasks,
         'non_productive_tasks': [{'name': t['name']} for t in non_productive_tasks],
         'active_timer': active_timer,
         'last_task': last_task,
@@ -1422,29 +1473,316 @@ def sync_to_excel(request):
 # Admin Control Panel
 @admin_required
 def admin_control_panel(request):
-    """Admin control panel for managing employees, projects, and tasks"""
-    # Get all active records
+    """Admin control panel for IFS-backed master data management."""
     employees = Employee.objects.filter(is_active=True).order_by('name')
-    projects = Project.objects.filter(is_active=True).order_by('name')
+    all_employees = Employee.objects.all().order_by('-is_active', 'name')
+    all_projects = Project.objects.all().order_by('name')
+    projects = all_projects.filter(is_active=True)
     productive_tasks = Task.objects.filter(is_active=True, is_non_productive=False).order_by('name')
     non_productive_tasks = Task.objects.filter(is_active=True, is_non_productive=True).order_by('name')
-    
-    # Format for display in textarea (ID\tName format)
+
     employees_text = '\n'.join([f"{emp.id}\t{emp.name}" for emp in employees])
     projects_text = '\n'.join([f"{proj.id}\t{proj.name} - {proj.project_description}" if proj.project_description else f"{proj.id}\t{proj.name}" for proj in projects])
     productive_tasks_text = '\n'.join([task.name for task in productive_tasks])
     non_productive_tasks_text = '\n'.join([task.name for task in non_productive_tasks])
+
+    mapping = load_ifs_activity_mapping()
+    mapping_entries = []
+    for report_cost_code, map_item in sorted(mapping.items(), key=lambda item: item[0]):
+        mapping_entries.append(
+            {
+                'report_cost_code': report_cost_code,
+                'report_cost_name': str(map_item.get('report_cost_name') or '').strip(),
+                'activity_name': str(map_item.get('activity_name') or '').strip(),
+                'is_non_productive': bool(map_item.get('is_non_productive', False)),
+            }
+        )
     
     return render(request, 'timesheet/admin_control_panel.html', {
         'employees_text': employees_text,
         'projects_text': projects_text,
         'productive_tasks_text': productive_tasks_text,
         'non_productive_tasks_text': non_productive_tasks_text,
+        'all_employees': all_employees,
+        'all_projects': all_projects,
+        'mapping_entries': mapping_entries,
         'employees_count': employees.count(),
         'projects_count': projects.count(),
         'productive_tasks_count': productive_tasks.count(),
         'non_productive_tasks_count': non_productive_tasks.count(),
     })
+
+
+@admin_required
+@transaction.atomic
+def refresh_master_data_from_ifs(request):
+    """Refresh employees and projects from IFS and store in local DB."""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'Only POST method allowed'}, status=405)
+
+    try:
+        connector = IFSAPIConnector()
+
+        projects_endpoint = os.environ.get(
+            'IFS_SHOP_ORDERS_PROJECTS_ENDPOINT',
+            (
+                "https://groupebriand.ifs.cloud/main/ifsapplications/"
+                "projection/v1/ShopOrdersHandling.svc/ShopOrds?"
+                "$filter=Objstate%20eq%20IfsApp.ShopOrdersHandling.ShopOrdState%27Planned%27"
+                "%20or%20Objstate%20eq%20IfsApp.ShopOrdersHandling.ShopOrdState%27Released%27"
+                "%20or%20Objstate%20eq%20IfsApp.ShopOrdersHandling.ShopOrdState%27Reserved%27"
+                "%20or%20Objstate%20eq%20IfsApp.ShopOrdersHandling.ShopOrdState%27Started%27"
+                "&$orderby=RevisedDueDate"
+                "&$select=Cf_Job_Bom_Item_Name,Cf_Project,Cf_Project_Name"
+            ),
+        )
+        employees_endpoint = os.environ.get(
+            'IFS_SHOPFLOOR_EMPLOYEES_REFRESH_ENDPOINT',
+            (
+                "https://groupebriand.ifs.cloud/main/ifsapplications/projection/v1/"
+                "ShopFloorEmployeesHandling.svc/ShopFloorEmployees?"
+                "$filter=Company%20eq%20%2754%27"
+                "&$select=Company,EmployeeId"
+                "&$expand=EmployeeIdRef($select=PersonId,Name)"
+            ),
+        )
+
+        projects_response = connector.get(projects_endpoint)
+        projects_response.raise_for_status()
+        projects_payload = projects_response.json()
+
+        employees_response = connector.get(employees_endpoint)
+        employees_response.raise_for_status()
+        employees_payload = employees_response.json()
+
+        # Refresh projects: fetched set is active, missing set inactive.
+        project_keys = set()
+        for item in projects_payload.get('value', []):
+            job_bom_item_name = str(item.get('Cf_Job_Bom_Item_Name') or '').strip()
+            cf_project = str(item.get('Cf_Project') or '').strip()
+            cf_project_name = str(item.get('Cf_Project_Name') or '').strip()
+            project_id = " - ".join(
+                [v for v in [job_bom_item_name, cf_project, cf_project_name] if v]
+            ).strip()
+            if not project_id:
+                continue
+            if project_id in project_keys:
+                continue
+            project_keys.add(project_id)
+            Project.objects.update_or_create(
+                id=project_id,
+                defaults={
+                    'name': project_id,
+                    'project_description': cf_project_name or None,
+                    'is_active': True,
+                },
+            )
+        if project_keys:
+            Project.objects.exclude(id__in=project_keys).update(is_active=False)
+
+        # Refresh employees:
+        # - existing rows keep their current is_active state
+        # - newly added rows default to is_active=False
+        # - employees missing in latest feed are set inactive
+        employee_ids = set()
+        added_inactive_count = 0
+        for item in employees_payload.get('value', []):
+            emp_id = str(item.get('EmployeeId') or '').strip()
+            if not emp_id:
+                continue
+            emp_ref = item.get('EmployeeIdRef') or {}
+            emp_name = str(emp_ref.get('Name') or emp_id).strip()
+            if not emp_name:
+                emp_name = emp_id
+
+            employee_ids.add(emp_id)
+            employee = Employee.objects.filter(id=emp_id).first()
+            if employee:
+                if employee.name != emp_name:
+                    employee.name = emp_name
+                    employee.save(update_fields=['name', 'updated_at'])
+            else:
+                Employee.objects.create(
+                    id=emp_id,
+                    name=emp_name,
+                    is_active=False,
+                )
+                added_inactive_count += 1
+
+        if employee_ids:
+            Employee.objects.exclude(id__in=employee_ids).update(is_active=False)
+
+        # Refresh report codes into Task master data (mapped via JSON).
+        activities_endpoint = os.environ.get(
+            'IFS_ACTIVITY_CODES_ENDPOINT',
+            (
+                "https://groupebriand.ifs.cloud/main/ifsapplications/projection/v1/"
+                "TimeRegistrationManagerHandling.svc/"
+                "GetValidActReportCode(CompanyId='54',ProjectId='TIME-54',"
+                "SubProjectId='MFG',AccountDate=2026-05-05,ActivitySeq=100006217)?"
+                "$filter=(CompanyId%20eq%20%2754%27)"
+                "&$select=ReportCode,ReportCostName,CompanyId,ReportCostCode,luname,keyref"
+                "&$skip=0&$top=101"
+            ),
+        )
+        activities_response = connector.get(activities_endpoint)
+        activities_response.raise_for_status()
+        activities_payload = activities_response.json()
+        mapping = load_ifs_activity_mapping()
+
+        productive_names = set()
+        non_productive_names = set()
+
+        for item in activities_payload.get('value', []):
+            report_cost_code = str(item.get('ReportCostCode') or '').strip()
+            report_cost_name = str(item.get('ReportCostName') or '').strip()
+            if not report_cost_code or not report_cost_name:
+                continue
+
+            map_item = mapping.get(report_cost_code, {})
+            task_name = str(
+                map_item.get('activity_name') or report_cost_name
+            ).strip()
+            if not task_name:
+                continue
+            is_non_productive = bool(map_item.get('is_non_productive', False))
+
+            if is_non_productive:
+                non_productive_names.add(task_name)
+            else:
+                productive_names.add(task_name)
+
+            Task.objects.update_or_create(
+                name=task_name,
+                is_non_productive=is_non_productive,
+                defaults={'is_active': True},
+            )
+
+        if productive_names:
+            Task.objects.filter(is_non_productive=False).exclude(
+                name__in=productive_names
+            ).update(is_active=False)
+        if non_productive_names:
+            Task.objects.filter(is_non_productive=True).exclude(
+                name__in=non_productive_names
+            ).update(is_active=False)
+
+        return JsonResponse(
+            {
+                'success': True,
+                'message': 'IFS data refreshed successfully.',
+                'projects_refreshed': len(project_keys),
+                'employees_seen': len(employee_ids),
+                'employees_added_inactive': added_inactive_count,
+                'productive_tasks_refreshed': len(productive_names),
+                'non_productive_tasks_refreshed': len(non_productive_names),
+            },
+            json_dumps_params={'ensure_ascii': False},
+        )
+    except Exception as exc:
+        logger.error("Failed to refresh master data from IFS: %s", exc, exc_info=True)
+        return JsonResponse(
+            {
+                'success': False,
+                'error': 'Failed to refresh master data from IFS.',
+                'details': str(exc),
+            },
+            status=500,
+            json_dumps_params={'ensure_ascii': False},
+        )
+
+
+@admin_required
+@transaction.atomic
+def set_employee_active(request):
+    """Toggle employee active state from admin control panel checkbox."""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'Only POST method allowed'}, status=405)
+
+    try:
+        data = json.loads(request.body or '{}')
+        employee_id = str(data.get('employee_id') or '').strip()
+        is_active = bool(data.get('is_active', False))
+        if not employee_id:
+            return JsonResponse(
+                {'success': False, 'error': 'employee_id is required'},
+                status=400,
+                json_dumps_params={'ensure_ascii': False},
+            )
+
+        updated = Employee.objects.filter(id=employee_id).update(is_active=is_active)
+        if not updated:
+            return JsonResponse(
+                {'success': False, 'error': 'Employee not found'},
+                status=404,
+                json_dumps_params={'ensure_ascii': False},
+            )
+
+        return JsonResponse(
+            {'success': True, 'employee_id': employee_id, 'is_active': is_active},
+            json_dumps_params={'ensure_ascii': False},
+        )
+    except Exception as exc:
+        logger.error("Failed to update employee active flag: %s", exc, exc_info=True)
+        return JsonResponse(
+            {'success': False, 'error': str(exc)},
+            status=500,
+            json_dumps_params={'ensure_ascii': False},
+        )
+
+
+@admin_required
+@transaction.atomic
+def save_activity_mapping(request):
+    """Save translation mapping rows edited from admin UI."""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'Only POST method allowed'}, status=405)
+
+    try:
+        data = json.loads(request.body or '{}')
+        rows = data.get('mappings')
+        if not isinstance(rows, list):
+            return JsonResponse(
+                {'success': False, 'error': 'mappings array is required'},
+                status=400,
+                json_dumps_params={'ensure_ascii': False},
+            )
+
+        new_mapping = {}
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            code = str(row.get('report_cost_code') or '').strip()
+            if not code:
+                continue
+            report_cost_name = str(row.get('report_cost_name') or '').strip()
+            activity_name = str(row.get('activity_name') or report_cost_name).strip()
+            is_non_productive = bool(row.get('is_non_productive', False))
+            new_mapping[code] = {
+                'report_cost_name': report_cost_name,
+                'activity_name': activity_name,
+                'is_non_productive': is_non_productive,
+            }
+
+        if not new_mapping:
+            return JsonResponse(
+                {'success': False, 'error': 'No valid mapping rows provided'},
+                status=400,
+                json_dumps_params={'ensure_ascii': False},
+            )
+
+        save_ifs_activity_mapping(new_mapping)
+        return JsonResponse(
+            {'success': True, 'saved_rows': len(new_mapping)},
+            json_dumps_params={'ensure_ascii': False},
+        )
+    except Exception as exc:
+        logger.error("Failed to save activity mapping: %s", exc, exc_info=True)
+        return JsonResponse(
+            {'success': False, 'error': str(exc)},
+            status=500,
+            json_dumps_params={'ensure_ascii': False},
+        )
 
 
 @admin_required
@@ -1804,6 +2142,8 @@ def edit_time_records(request):
             'calculated_hours': round(calculated_hours, 2) if calculated_hours is not None else None,
             'duration_seconds': duration_seconds,
             'is_non_productive': record.is_non_productive,
+            'ifs_sent': bool(getattr(record, 'ifs_sent', False)),
+            'ifs_sent_at': record.ifs_sent_at.isoformat() if getattr(record, 'ifs_sent_at', None) else '',
         }
         
         records_data.append(record_dict)
@@ -1819,12 +2159,35 @@ def edit_time_records(request):
     projects = Project.objects.filter(is_active=True).order_by('name')
     productive_tasks = Task.objects.filter(is_active=True, is_non_productive=False).order_by('name')
     non_productive_tasks = Task.objects.filter(is_active=True, is_non_productive=True).order_by('name')
+    mapping = load_ifs_activity_mapping()
+    task_code_map = {}
+    for code, item in mapping.items():
+        activity_name = str(item.get('activity_name') or '').strip()
+        report_cost_name = str(item.get('report_cost_name') or '').strip()
+        aliases = item.get('activity_aliases') or []
+        if activity_name:
+            task_code_map[activity_name.lower()] = code
+        if report_cost_name:
+            task_code_map[report_cost_name.lower()] = code
+        if isinstance(aliases, list):
+            for alias in aliases:
+                alias_text = str(alias or '').strip()
+                if alias_text:
+                    task_code_map[alias_text.lower()] = code
+    productive_tasks_data = [
+        {
+            'name': task.name,
+            'report_cost_code': task_code_map.get(task.name.lower(), ''),
+        }
+        for task in productive_tasks
+    ]
     
     return render(request, 'timesheet/edit_time_records.html', {
         'records': records_data,
         'employees': employees,
         'projects': projects,
         'productive_tasks': productive_tasks,
+        'productive_tasks_data': productive_tasks_data,
         'non_productive_tasks': non_productive_tasks,
         'filters': {
             'employee': employee_filter,
@@ -1839,6 +2202,422 @@ def edit_time_records(request):
             'total_records': total_records,
         },
     })
+
+
+@admin_required
+def timesheet_register(request):
+    """Dedicated timesheet register page."""
+    employees = Employee.objects.filter(is_active=True).order_by('name')
+    projects = Project.objects.filter(is_active=True).order_by('name')
+    productive_tasks = Task.objects.filter(
+        is_active=True, is_non_productive=False
+    ).order_by('name')
+    non_productive_tasks = Task.objects.filter(
+        is_active=True, is_non_productive=True
+    ).order_by('name')
+
+    return render(request, 'timesheet/timesheet_entry.html', {
+        'employees': employees,
+        'projects': projects,
+        'productive_tasks': productive_tasks,
+        'non_productive_tasks': non_productive_tasks,
+    })
+
+
+@admin_required
+def ifs_employees(request):
+    """Return IFS employees for dropdown population."""
+    if request.method != 'GET':
+        return JsonResponse({'error': 'Only GET allowed'}, status=405)
+
+    try:
+        connector = IFSAPIConnector()
+        endpoint = os.environ.get(
+            'IFS_SHOPFLOOR_EMPLOYEES_ENDPOINT',
+            (
+                "https://groupebriand.ifs.cloud/main/ifsapplications/"
+                "projection/v1/ShopFloorEmployeesHandling.svc/"
+                "ShopFloorEmployees?$filter=(Company%20eq%20%2754%27)"
+                "&$select=Company,EmployeeId,EmployeeSiteCount,"
+                "DispLiIdleTime,ResumeOption,AllowEmpTimeManagement,"
+                "WorkbenchUser,AllowConcurrentOp,AttendanceAutoClockIn,"
+                "NoteText,Objgrants,luname,keyref&$expand=EmployeeIdRef"
+                "($select=PersonId,Name,luname,keyref)"
+                "&use-timezone-filter=false&$skip=0"
+            ),
+        )
+        response = connector.get(endpoint)
+        response.raise_for_status()
+
+        payload = response.json()
+        employees = []
+        for item in payload.get('value', []):
+            employee_id = str(item.get('EmployeeId', '')).strip()
+            if not employee_id:
+                continue
+            employee_ref = item.get('EmployeeIdRef') or {}
+            employee_name = str(
+                employee_ref.get('Name') or employee_id
+            ).strip()
+            employees.append(
+                {
+                    'id': employee_id,
+                    'name': employee_name,
+                    'display': f"{employee_name} [{employee_id}]",
+                }
+            )
+
+        employees.sort(key=lambda emp: emp['name'].lower())
+        return JsonResponse({'success': True, 'employees': employees})
+    except Exception as exc:
+        logger.error("Failed to load IFS employees: %s", exc, exc_info=True)
+        return JsonResponse(
+            {
+                'success': False,
+                'error': 'Failed to load employees from IFS.',
+                'details': str(exc),
+            },
+            status=500,
+            json_dumps_params={'ensure_ascii': False},
+        )
+
+
+@login_required
+def ifs_projects(request):
+    """Return distinct IFS projects for dropdown population."""
+    if request.method != 'GET':
+        return JsonResponse({'error': 'Only GET allowed'}, status=405)
+
+    try:
+        connector = IFSAPIConnector()
+        endpoint = os.environ.get(
+            'IFS_SHOP_ORDERS_PROJECTS_ENDPOINT',
+            (
+                "https://groupebriand.ifs.cloud/main/ifsapplications/"
+                "projection/v1/ShopOrdersHandling.svc/ShopOrds?"
+                "$filter=Objstate%20eq%20IfsApp.ShopOrdersHandling.ShopOrdState%27Planned%27"
+                "%20or%20Objstate%20eq%20IfsApp.ShopOrdersHandling.ShopOrdState%27Released%27"
+                "%20or%20Objstate%20eq%20IfsApp.ShopOrdersHandling.ShopOrdState%27Reserved%27"
+                "%20or%20Objstate%20eq%20IfsApp.ShopOrdersHandling.ShopOrdState%27Started%27"
+                "&$orderby=RevisedDueDate"
+                "&$select=Cf_Job_Bom_Item_Name,Cf_Project,Cf_Project_Name"
+            ),
+        )
+        response = connector.get(endpoint)
+        response.raise_for_status()
+
+        payload = response.json()
+        projects = []
+        distinct_values = set()
+
+        for item in payload.get('value', []):
+            job_bom_item_name = str(item.get('Cf_Job_Bom_Item_Name') or '').strip()
+            cf_project = str(item.get('Cf_Project') or '').strip()
+            cf_project_name = str(item.get('Cf_Project_Name') or '').strip()
+
+            # Distinct on concat(Cf_Job_Bom_Item_Name + Cf_Project + Cf_Project_Name)
+            concat_key = f"{job_bom_item_name}||{cf_project}||{cf_project_name}"
+            if concat_key in distinct_values:
+                continue
+            distinct_values.add(concat_key)
+
+            display_parts = [
+                value for value in [job_bom_item_name, cf_project, cf_project_name] if value
+            ]
+            display_value = " - ".join(display_parts).strip()
+            if not display_value:
+                continue
+
+            projects.append(
+                {
+                    'id': display_value,
+                    'name': display_value,
+                    'display': display_value,
+                    'job_bom_item_name': job_bom_item_name,
+                    'project_code': cf_project,
+                    'project_name': cf_project_name,
+                }
+            )
+
+            # Keep locally cached projects available for pages using DB-backed lists.
+            Project.objects.update_or_create(
+                id=display_value,
+                defaults={
+                    'name': display_value,
+                    'project_description': cf_project_name or None,
+                    'is_active': True,
+                },
+            )
+
+        projects.sort(key=lambda proj: proj['display'].lower())
+        return JsonResponse({'success': True, 'projects': projects})
+    except Exception as exc:
+        logger.error("Failed to load IFS projects: %s", exc, exc_info=True)
+        return JsonResponse(
+            {
+                'success': False,
+                'error': 'Failed to load projects from IFS.',
+                'details': str(exc),
+            },
+            status=500,
+            json_dumps_params={'ensure_ascii': False},
+        )
+
+
+@login_required
+def ifs_activity_codes(request):
+    """Return mapped IFS activity codes grouped for productive/non-productive."""
+    if request.method != 'GET':
+        return JsonResponse({'error': 'Only GET allowed'}, status=405)
+
+    try:
+        connector = IFSAPIConnector()
+        endpoint = os.environ.get(
+            'IFS_ACTIVITY_CODES_ENDPOINT',
+            (
+                "https://groupebriand.ifs.cloud/main/ifsapplications/projection/v1/"
+                "TimeRegistrationManagerHandling.svc/"
+                "GetValidActReportCode(CompanyId='54',ProjectId='TIME-54',"
+                "SubProjectId='MFG',AccountDate=2026-05-05,ActivitySeq=100006217)?"
+                "$filter=(CompanyId%20eq%20%2754%27)"
+                "&$select=ReportCode,ReportCostName,CompanyId,ReportCostCode,luname,keyref"
+                "&$skip=0&$top=101"
+            ),
+        )
+        response = connector.get(endpoint)
+        response.raise_for_status()
+
+        payload = response.json()
+        mapping = load_ifs_activity_mapping()
+
+        productive_tasks = []
+        non_productive_tasks = []
+        productive_seen = set()
+        non_productive_seen = set()
+
+        for item in payload.get('value', []):
+            report_cost_code = str(item.get('ReportCostCode') or '').strip()
+            report_cost_name = str(item.get('ReportCostName') or '').strip()
+            if not report_cost_code or not report_cost_name:
+                continue
+
+            map_item = mapping.get(report_cost_code, {})
+            activity_name = str(
+                map_item.get('activity_name') or report_cost_name
+            ).strip()
+            is_non_productive = bool(map_item.get('is_non_productive', False))
+
+            task_payload = {
+                'report_cost_code': report_cost_code,
+                'report_cost_name': report_cost_name,
+                'activity_name': activity_name,
+            }
+
+            if is_non_productive:
+                dedup_key = (report_cost_code, activity_name)
+                if dedup_key in non_productive_seen:
+                    continue
+                non_productive_seen.add(dedup_key)
+                non_productive_tasks.append(task_payload)
+            else:
+                dedup_key = (report_cost_code, activity_name)
+                if dedup_key in productive_seen:
+                    continue
+                productive_seen.add(dedup_key)
+                productive_tasks.append(task_payload)
+
+        productive_tasks.sort(key=lambda item: item['activity_name'].lower())
+        non_productive_tasks.sort(key=lambda item: item['activity_name'].lower())
+
+        return JsonResponse(
+            {
+                'success': True,
+                'productive_tasks': productive_tasks,
+                'non_productive_tasks': non_productive_tasks,
+            },
+            json_dumps_params={'ensure_ascii': False},
+        )
+    except Exception as exc:
+        logger.error("Failed to load IFS activity codes: %s", exc, exc_info=True)
+        return JsonResponse(
+            {
+                'success': False,
+                'error': 'Failed to load activities from IFS.',
+                'details': str(exc),
+            },
+            status=500,
+            json_dumps_params={'ensure_ascii': False},
+        )
+
+
+@admin_required
+def employee_day_summary(request):
+    """Return summary data from IFS for one employee/day."""
+    if request.method != 'GET':
+        return JsonResponse({'error': 'Only GET allowed'}, status=405)
+
+    employee_id = request.GET.get('employee_id', '').strip()
+    date_str = request.GET.get('date', '').strip()
+
+    if not employee_id or not date_str:
+        return JsonResponse(
+            {
+                'success': False,
+                'error': 'employee_id and date are required.',
+            },
+            status=400,
+            json_dumps_params={'ensure_ascii': False},
+        )
+
+    try:
+        date_value = datetime.strptime(date_str, '%Y-%m-%d').date()
+    except ValueError:
+        return JsonResponse(
+            {
+                'success': False,
+                'error': 'Invalid date format. Use YYYY-MM-DD.',
+            },
+            status=400,
+            json_dumps_params={'ensure_ascii': False},
+        )
+
+    employee_name = request.GET.get('employee_name', '').strip() or employee_id
+    company_id = os.environ.get('IFS_COMPANY_ID', '54').strip() or '54'
+    day_start_iso = f"{date_str}T00:00:00Z"
+    day_end_iso = f"{date_str}T23:59:59Z"
+    week_end_str = (date_value + timedelta(days=6)).strftime('%Y-%m-%d')
+
+    shop_floor_base = os.environ.get(
+        'IFS_SHOPFLOOR_REPORTS_BASE_URL',
+        (
+            "https://groupebriand.ifs.cloud/main/ifsapplications/"
+            "projection/v1/ShopFloorReportsHandling.svc/"
+            "ShopOrdTransactionUtilSet"
+        ),
+    ).strip()
+    time_reg_base = os.environ.get(
+        'IFS_TIME_REG_REPORTS_BASE_URL',
+        (
+            "https://groupebriand.ifs.cloud/main/ifsapplications/"
+            "projection/v1/TimeRegistrationManagerHandling.svc"
+        ),
+    ).strip()
+
+    shop_floor_filter = (
+        f"Dated ge {day_start_iso} and Dated le {day_end_iso} and "
+        f"startswith(Empno,'{employee_id}')"
+    )
+    shop_floor_url = (
+        f"{shop_floor_base}?$filter="
+        f'{quote(shop_floor_filter, safe="()=,\'-:")}'
+    )
+
+    report_filter = (
+        f"AccountDate ge {date_str} and AccountDate le {week_end_str}"
+    )
+    report_items_url = (
+        f"{time_reg_base}/Employees(CompanyId='{company_id}',"
+        f"EmpNo='{employee_id}')/ReportItemSet?$filter="
+        f'{quote(report_filter, safe="()=,\'-:")}'
+    )
+
+    try:
+        connector = IFSAPIConnector()
+
+        shop_floor_response = connector.get(shop_floor_url)
+        shop_floor_response.raise_for_status()
+        shop_floor_items = shop_floor_response.json().get('value', [])
+
+        report_items_response = connector.get(report_items_url)
+        report_items_response.raise_for_status()
+        report_items = report_items_response.json().get('value', [])
+    except Exception as exc:
+        logger.error(
+            "Failed to load IFS employee summary for %s (%s): %s",
+            employee_id,
+            date_str,
+            exc,
+            exc_info=True,
+        )
+        return JsonResponse(
+            {
+                'success': False,
+                'error': 'Failed to load summary from IFS.',
+                'details': str(exc),
+            },
+            status=500,
+            json_dumps_params={'ensure_ascii': False},
+        )
+
+    def clean_report_description(raw_description):
+        text = (raw_description or '').strip()
+        marker = '* * 200'
+        if marker in text:
+            return text.split(marker, 1)[1].strip()
+        return text
+
+    transaction_map = {}
+    for item in shop_floor_items:
+        transaction_id = item.get('TransactionId')
+        if transaction_id is None:
+            continue
+        transaction_map[str(transaction_id)] = {
+            'part_no': (item.get('PartNo') or '-').strip(),
+            'work_center_no': (item.get('WorkCenterNo') or '-').strip(),
+            'operation_description': (
+                item.get('OperationDescription') or ''
+            ).strip(),
+            'work_hours': float(item.get('WorkHours') or 0),
+        }
+
+    joined_rows = []
+    total_hours = 0.0
+    matched_count = 0
+    for item in report_items:
+        hours = float(item.get('Hours') or 0)
+        total_hours += hours
+
+        report_sequence = item.get('ReportSequence')
+        joined = transaction_map.get(str(report_sequence), {})
+        if joined:
+            matched_count += 1
+
+        joined_rows.append(
+            {
+                'account_date': item.get('AccountDate'),
+                'description': clean_report_description(item.get('Description')),
+                'description_raw': item.get('Description') or '',
+                'label': item.get('Label') or '',
+                'organization': item.get('Organization') or '',
+                'hours': round(hours, 2),
+                'report_sequence': report_sequence,
+                'transaction_id': report_sequence,
+                'part_no': joined.get('part_no', '-'),
+                'work_center_no': joined.get('work_center_no', '-'),
+                'operation_description': joined.get(
+                    'operation_description', ''
+                ),
+                'shop_floor_hours': round(joined.get('work_hours', 0), 2),
+            }
+        )
+    joined_rows.sort(key=lambda row: row['hours'], reverse=True)
+
+    return JsonResponse(
+        {
+            'success': True,
+            'employee_id': employee_id,
+            'employee_name': employee_name,
+            'date': date_str,
+            'total_hours': round(total_hours, 2),
+            'record_count': len(joined_rows),
+            'joined_rows': joined_rows,
+            'shop_floor_raw_count': len(shop_floor_items),
+            'report_items_count': len(joined_rows),
+            'matched_rows_count': matched_count,
+            'range_end_date': week_end_str,
+        },
+        json_dumps_params={'ensure_ascii': False},
+    )
 
 
 @admin_required
@@ -2242,6 +3021,341 @@ def bulk_save_time_records(request):
         }, status=500, json_dumps_params={'ensure_ascii': False})
 
 
+@admin_required
+def send_records_to_ifs(request):
+    """Send selected time records to IFS and mark successful ones as sent."""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'Only POST method allowed'}, status=405)
+
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse(
+            {'success': False, 'error': 'Invalid JSON payload'},
+            status=400,
+            json_dumps_params={'ensure_ascii': False},
+        )
+
+    record_ids = data.get('record_ids') or []
+    if not isinstance(record_ids, list) or not record_ids:
+        return JsonResponse(
+            {'success': False, 'error': 'record_ids must be a non-empty array'},
+            status=400,
+            json_dumps_params={'ensure_ascii': False},
+        )
+
+    endpoint = os.environ.get(
+        'IFS_REPORT_DATE_RANGE_ENDPOINT',
+        (
+            "https://groupebriand.ifs.cloud/main/ifsapplications/projection/v1/"
+            "TimeRegistrationManagerHandling.svc/ReportDateRangeWithIntervals"
+        ),
+    ).strip()
+
+    mapping = load_ifs_activity_mapping()
+
+    def resolve_report_cost_code(task_name):
+        normalized = str(task_name or '').strip().lower()
+        if not normalized:
+            return None
+        for code, item in mapping.items():
+            code_name = str(code or '').strip().lower()
+            activity_name = str(item.get('activity_name') or '').strip().lower()
+            report_cost_name = str(item.get('report_cost_name') or '').strip().lower()
+            aliases = item.get('activity_aliases') or []
+            alias_match = False
+            if isinstance(aliases, list):
+                alias_match = any(
+                    normalized == str(alias or '').strip().lower()
+                    for alias in aliases
+                )
+            if (
+                normalized == code_name
+                or normalized == activity_name
+                or normalized == report_cost_name
+                or alias_match
+            ):
+                return code
+        return None
+
+    ALLOWED_CODES_54 = {"PACK", "PRODSCHED", "LOAD", "PRODSV"}
+    ALLOWED_CODES_MC = {"ADM", "LOAD", "PM", "PRODSCHED", "PRODSV", "PACK"}
+    DISALLOWED_PROJECT_TASKS = {
+        "ŠKOLENÍ",
+        "SKLAD",
+        "KLIPY",
+        "ŠROT",
+        "INVENTURA",
+        "ÚKLID",
+    }
+
+    def extract_project_company(short_name):
+        text = str(short_name or '').strip()
+        if not text:
+            return None
+        # Accept patterns like "-54.", "-54 -", "-54 " or "-54" end.
+        match = re.search(r'-(\d{2})(?=[^\d]|$)', text)
+        if match:
+            return match.group(1)
+        return None
+
+    def extract_project_core_54(project_text):
+        """Extract token like 45649E1-54 from display strings."""
+        text = str(project_text or '').strip()
+        if not text:
+            return None
+        # Prefer explicit token with -54
+        match = re.search(r'([A-Za-z0-9]+-54)\b', text)
+        if match:
+            return match.group(1)
+        # Fallback: second segment from "A - B - C" style
+        parts = [part.strip() for part in text.split(' - ') if part.strip()]
+        if len(parts) >= 2 and '-54' in parts[1]:
+            return parts[1]
+        return None
+
+    def extract_project_core_for_company(project_text, company_code):
+        """Extract token like 43776X1-63 for given company code."""
+        text = str(project_text or '').strip()
+        company = str(company_code or '').strip()
+        if not text or not company:
+            return None
+        match = re.search(rf'([A-Za-z0-9]+-{re.escape(company)})\b', text)
+        if match:
+            return match.group(1)
+        parts = [part.strip() for part in text.split(' - ') if part.strip()]
+        for part in parts:
+            if f'-{company}' in part:
+                return part
+        return None
+
+    connector = IFSAPIConnector()
+    results = []
+    sent_count = 0
+
+    for record_id in record_ids:
+        try:
+            record = TimeRecord.objects.get(id=record_id)
+        except TimeRecord.DoesNotExist:
+            results.append({'id': record_id, 'success': False, 'error': 'Record not found'})
+            continue
+
+        if record.ifs_sent:
+            results.append(
+                {
+                    'id': str(record.id),
+                    'success': True,
+                    'skipped': True,
+                    'message': 'Already sent to IFS',
+                }
+            )
+            continue
+
+        start_dt_excel = convert_to_excel_timezone(record.start_time)
+        date_str = start_dt_excel.strftime('%Y-%m-%d')
+        in_time = f"{date_str}T07:00:00Z"
+        out_time = f"{date_str}T15:00:00Z"
+        break_in = f"{date_str}T11:00:00Z"
+        break_out = f"{date_str}T11:30:00Z"
+        duration_hours = round((record.duration_seconds or 0) / 3600.0, 2)
+        if duration_hours <= 0:
+            results.append(
+                {
+                    'id': str(record.id),
+                    'success': False,
+                    'error': 'Duration hours must be greater than 0',
+                }
+            )
+            continue
+        project_short_name = str(record.project_id or record.project_name or '').strip()
+        project_company = extract_project_company(project_short_name)
+        task_upper = str(record.task or '').strip().upper()
+        if not record.is_non_productive and task_upper in DISALLOWED_PROJECT_TASKS:
+            results.append(
+                {
+                    'id': str(record.id),
+                    'success': False,
+                    'error': f'Activity "{record.task}" is not allowed for project reporting',
+                }
+            )
+            continue
+
+        if record.is_non_productive:
+            base_payload = get_non_prod_base_payload()
+            report_cost_code = resolve_report_cost_code(record.task)
+            if not report_cost_code:
+                results.append(
+                    {
+                        'id': str(record.id),
+                        'success': False,
+                        'error': f'Could not map task "{record.task}" to ReportCostCode',
+                    }
+                )
+                continue
+
+            short_name_value = base_payload.get("ShortName")
+            customer_company_id = None
+            customer_act_short_name = None
+            customer_act_report_code = None
+        else:
+            base_payload = get_prod_base_payload()
+
+            # MC body: for productive rows where project points to customer company != 54.
+            if project_company and project_company != "54":
+                activity_report_code = resolve_report_cost_code(record.task)
+                if not activity_report_code:
+                    results.append(
+                        {
+                            'id': str(record.id),
+                            'success': False,
+                            'error': f'Could not map task "{record.task}" to ReportCostCode',
+                        }
+                    )
+                    continue
+                if activity_report_code not in ALLOWED_CODES_MC:
+                    results.append(
+                        {
+                            'id': str(record.id),
+                            'success': False,
+                            'error': (
+                                f'ReportCostCode "{activity_report_code}" not allowed for MC project '
+                                f'({project_short_name}). Allowed: {", ".join(sorted(ALLOWED_CODES_MC))}'
+                            ),
+                        }
+                    )
+                    continue
+                report_cost_code = "MC"
+                short_name_value = "TIME-54.MCPR.MC-TIME"
+                customer_company_id = project_company
+                project_core_mc = extract_project_core_for_company(project_short_name, project_company)
+                if not project_core_mc:
+                    results.append(
+                        {
+                            'id': str(record.id),
+                            'success': False,
+                            'error': (
+                                f'Could not extract project core for MC project "{project_short_name}". '
+                                'Expected token like 43776X1-63.'
+                            ),
+                        }
+                    )
+                    continue
+                customer_act_short_name = f"{project_core_mc}.40.10" if project_core_mc else None
+                customer_act_report_code = activity_report_code
+            else:
+                report_cost_code = resolve_report_cost_code(record.task)
+                if not report_cost_code:
+                    results.append(
+                        {
+                            'id': str(record.id),
+                            'success': False,
+                            'error': f'Could not map task "{record.task}" to ReportCostCode',
+                        }
+                    )
+                    continue
+                if report_cost_code not in ALLOWED_CODES_54:
+                    results.append(
+                        {
+                            'id': str(record.id),
+                            'success': False,
+                            'error': (
+                                f'ReportCostCode "{report_cost_code}" not allowed for company 54 project '
+                                f'({project_short_name or "N/A"}). Allowed: {", ".join(sorted(ALLOWED_CODES_54))}'
+                            ),
+                        }
+                    )
+                    continue
+                project_core_54 = extract_project_core_54(project_short_name)
+                if not project_core_54:
+                    results.append(
+                        {
+                            'id': str(record.id),
+                            'success': False,
+                            'error': (
+                                f'Could not extract project core for company 54 project "{project_short_name}". '
+                                'Expected token like 45649E1-54.'
+                            ),
+                        }
+                    )
+                    continue
+                short_name_value = f"{project_core_54}.40.10"
+                customer_company_id = None
+                customer_act_short_name = None
+                customer_act_report_code = None
+
+        request_body = dict(base_payload)
+        request_body.update(
+            {
+                "EmpNo": str(record.employee_id),
+                "AccountDateDate": date_str,
+                "AccountDateTime": in_time,
+                "InTime": in_time,
+                "OutTime": out_time if record.is_non_productive else (
+                    out_time if project_company == "54" else base_payload.get("OutTime")
+                ),
+                "OutPersClass": "Normal" if (record.is_non_productive or project_company == "54") else base_payload.get("OutPersClass"),
+                "AbsenceInTime": in_time,
+                "AbsenceOutTime": out_time if (record.is_non_productive or project_company == "54") else None,
+                "BreakInTime": break_in,
+                "BreakOutTime": break_out,
+                "DayHours": duration_hours,
+                "WageHours": duration_hours if (not record.is_non_productive) else base_payload.get("WageHours"),
+                "ReportCostCode": report_cost_code,
+                "ShortName": short_name_value,
+                "CustomerCompanyId": customer_company_id,
+                "CustomerActShortName": customer_act_short_name,
+                "CustomerActReportCode": customer_act_report_code,
+                "DateFrom": date_str,
+                "DateTo": date_str,
+            }
+        )
+
+        try:
+            logger.warning(
+                "Sending record %s to IFS route: %s",
+                str(record.id),
+                endpoint,
+            )
+            logger.warning(
+                "IFS request body for record %s: %s",
+                str(record.id),
+                json.dumps(request_body, ensure_ascii=False),
+            )
+            response = connector.post(endpoint, request_body)
+            logger.warning(
+                "IFS response for record %s: status=%s body=%s",
+                str(record.id),
+                response.status_code,
+                response.text[:2000],
+            )
+            if response.ok:
+                record.ifs_sent = True
+                record.ifs_sent_at = timezone.now()
+                record.save(update_fields=['ifs_sent', 'ifs_sent_at'])
+                sent_count += 1
+                results.append({'id': str(record.id), 'success': True})
+            else:
+                results.append(
+                    {
+                        'id': str(record.id),
+                        'success': False,
+                        'error': f'IFS HTTP {response.status_code}: {response.text[:300]}',
+                    }
+                )
+        except Exception as exc:
+            results.append({'id': str(record.id), 'success': False, 'error': str(exc)})
+
+    return JsonResponse(
+        {
+            'success': True,
+            'total': len(record_ids),
+            'sent_count': sent_count,
+            'results': results,
+        },
+        json_dumps_params={'ensure_ascii': False},
+    )
+
+
 # Daily top-up constants: only top up days with 4h < total < 6.91h to reach 6.91h
 DAILY_MIN_HOURS = 4.0
 DAILY_TARGET_HOURS = 6.91
@@ -2426,14 +3540,27 @@ def create_time_record(request):
                     'error': f'Missing required field: {field}'
                 }, status=400, json_dumps_params={'ensure_ascii': False})
         
-        # Get employee
+        employee_id = str(data.get('employee_id', '')).strip()
+        if not employee_id:
+            return JsonResponse(
+                {
+                    'success': False,
+                    'error': 'Employee ID is required',
+                },
+                status=400,
+                json_dumps_params={'ensure_ascii': False},
+            )
+
+        # Prefer local employee name when available,
+        # fallback to frontend-sent name for IFS-loaded employees.
+        employee_name = str(data.get('employee_name', '')).strip()
         try:
-            employee = Employee.objects.get(id=data['employee_id'], is_active=True)
+            employee = Employee.objects.get(id=employee_id, is_active=True)
+            employee_id = employee.id
+            employee_name = employee.name
         except Employee.DoesNotExist:
-            return JsonResponse({
-                'success': False,
-                'error': 'Employee not found'
-            }, status=404, json_dumps_params={'ensure_ascii': False})
+            if not employee_name:
+                employee_name = employee_id
         
         # Parse start time
         try:
@@ -2491,8 +3618,8 @@ def create_time_record(request):
         
         # Create record
         record = TimeRecord.objects.create(
-            employee_id=employee.id,
-            employee_name=employee.name,
+            employee_id=employee_id,
+            employee_name=employee_name,
             project_id=project_id,
             project_name=project_name,
             task=data['task'],
@@ -2502,7 +3629,12 @@ def create_time_record(request):
             duration_seconds=duration_seconds,
         )
         
-        logger.info(f"Created new time record {record.id} for employee {employee.name}")
+        logger.info(
+            "Created new time record %s for employee %s (%s)",
+            record.id,
+            employee_name,
+            employee_id,
+        )
         
         return JsonResponse({
             'success': True,

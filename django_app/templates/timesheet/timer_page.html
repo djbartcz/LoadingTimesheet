@@ -433,11 +433,13 @@
                     </div>
                 </div>
                 <div class="p-2.5 sm:p-3">
-                    <div class="grid grid-cols-2 gap-2 task-grid-mobile">
+                    <div id="productive-task-grid" class="grid grid-cols-2 gap-2 task-grid-mobile">
                         {% for task in tasks %}
-                        <button type="button" onclick="selectTask('{{ task.name }}')" class="task-btn p-2.5 sm:p-3.5 bg-slate-50 border-2 border-slate-200 rounded-lg font-grotesk text-xs sm:text-[13px] font-semibold text-slate-600 hover:border-accent-primary hover:text-accent-primary transition-all cursor-pointer active:scale-[0.98]" data-task="{{ task.name }}">
+                        <button type="button" onclick="selectTask('{{ task.name }}', this)" class="task-btn p-2.5 sm:p-3.5 bg-slate-50 border-2 border-slate-200 rounded-lg font-grotesk text-xs sm:text-[13px] font-semibold text-slate-600 hover:border-accent-primary hover:text-accent-primary transition-all cursor-pointer active:scale-[0.98]" data-task="{{ task.name }}" data-report-cost-code="{{ task.report_cost_code }}">
                             {{ task.name }}
                         </button>
+                        {% empty %}
+                        <p class="col-span-2 text-xs text-slate-500 text-center py-2">Žádné produktivní úkony.</p>
                         {% endfor %}
                     </div>
                 </div>
@@ -456,11 +458,13 @@
                     </div>
                 </div>
                 <div class="p-2.5 sm:p-3">
-                    <div class="grid grid-cols-2 gap-2 task-grid-mobile">
+                    <div id="nonproductive-task-grid" class="grid grid-cols-2 gap-2 task-grid-mobile">
                         {% for task in non_productive_tasks %}
-                        <button type="button" onclick="selectNonProductiveTask('{{ task.name }}')" class="task-btn-np p-2.5 sm:p-3.5 bg-slate-50 border-2 border-slate-200 rounded-lg font-grotesk text-xs sm:text-[13px] font-semibold text-slate-600 hover:border-accent-orange hover:text-accent-orange transition-all cursor-pointer active:scale-[0.98]" data-task="{{ task.name }}">
+                        <button type="button" onclick="selectNonProductiveTask('{{ task.name }}', this)" class="task-btn-np p-2.5 sm:p-3.5 bg-slate-50 border-2 border-slate-200 rounded-lg font-grotesk text-xs sm:text-[13px] font-semibold text-slate-600 hover:border-accent-orange hover:text-accent-orange transition-all cursor-pointer active:scale-[0.98]" data-task="{{ task.name }}">
                             {{ task.name }}
                         </button>
+                        {% empty %}
+                        <p class="col-span-2 text-xs text-slate-500 text-center py-2">Žádné neproduktivní úkony.</p>
                         {% endfor %}
                     </div>
                 </div>
@@ -508,7 +512,7 @@
         </svg>
         <input type="text" id="project-search" placeholder="Hledat projekt..." class="flex-1 border-none bg-transparent text-base outline-none" oninput="filterProjects(this.value)">
     </div>
-    <div class="flex-1 overflow-y-auto p-2">
+    <div id="project-list" class="flex-1 overflow-y-auto p-2">
         {% for project in projects %}
         <button onclick="selectProject('{{ project.id }}', '{{ project.name|escapejs }}')" class="project-item w-full flex items-center justify-between p-4 bg-white border-2 border-slate-200 rounded-xl mb-2 text-left hover:border-accent-primary transition-all" data-project-id="{{ project.id }}" data-project-name="{{ project.name }}">
             <div class="flex flex-col gap-0.5">
@@ -530,6 +534,9 @@
     let selectedProject = null;
     let selectedTask = null;
     let selectedNonProductiveTask = null;
+    const ALLOWED_CODES_54 = new Set(['PACK', 'PRODSCHED', 'LOAD', 'PRODSV']);
+    const ALLOWED_CODES_MC = new Set(['ADM', 'LOAD', 'PM', 'PRODSCHED', 'PRODSV', 'PACK']);
+    const DISALLOWED_PROJECT_TASKS = new Set(['ŠKOLENÍ', 'SKLAD', 'KLIPY', 'ŠROT', 'INVENTURA', 'ÚKLID']);
     
     function setMode(mode) {
         currentMode = mode;
@@ -538,7 +545,7 @@
         if (mode === 'productive') {
             document.getElementById('mode-productive').classList.add('bg-accent-primary', 'text-white');
             document.getElementById('mode-productive').classList.remove('bg-transparent', 'text-slate-600');
-            document.getElementById('mode-nonproductive').classList.remove('bg-accent-primary', 'text-white');
+            document.getElementById('mode-nonproductive').classList.remove('bg-accent-primary', 'bg-accent-orange', 'text-white');
             document.getElementById('mode-nonproductive').classList.add('bg-transparent', 'text-slate-600');
             document.getElementById('productive-section').classList.remove('hidden');
             document.getElementById('nonproductive-section').classList.add('hidden');
@@ -558,31 +565,36 @@
         document.getElementById('form-project-id').value = id;
         document.getElementById('form-project-name').value = name;
         document.getElementById('selected-project-name').textContent = name;
+        applyProductiveTaskRules();
         hideProjectModal();
         updateStartButton();
     }
     
-    function selectTask(task) {
+    function selectTask(task, buttonEl) {
         selectedTask = task;
         document.getElementById('form-task').value = task;
         document.querySelectorAll('.task-btn').forEach(btn => {
             btn.classList.remove('bg-accent-primary', 'border-accent-primary', 'text-white');
             btn.classList.add('bg-slate-50', 'border-slate-200', 'text-slate-600');
         });
-        event.target.classList.add('bg-accent-primary', 'border-accent-primary', 'text-white');
-        event.target.classList.remove('bg-slate-50', 'border-slate-200', 'text-slate-600');
+        if (buttonEl) {
+            buttonEl.classList.add('bg-accent-primary', 'border-accent-primary', 'text-white');
+            buttonEl.classList.remove('bg-slate-50', 'border-slate-200', 'text-slate-600');
+        }
         updateStartButton();
     }
     
-    function selectNonProductiveTask(task) {
+    function selectNonProductiveTask(task, buttonEl) {
         selectedNonProductiveTask = task;
         document.getElementById('form-nonproductive-task').value = task;
         document.querySelectorAll('.task-btn-np').forEach(btn => {
             btn.classList.remove('bg-accent-orange', 'border-accent-orange', 'text-white');
             btn.classList.add('bg-slate-50', 'border-slate-200', 'text-slate-600');
         });
-        event.target.classList.add('bg-accent-orange', 'border-accent-orange', 'text-white');
-        event.target.classList.remove('bg-slate-50', 'border-slate-200', 'text-slate-600');
+        if (buttonEl) {
+            buttonEl.classList.add('bg-accent-orange', 'border-accent-orange', 'text-white');
+            buttonEl.classList.remove('bg-slate-50', 'border-slate-200', 'text-slate-600');
+        }
         updateStartButton();
     }
     
@@ -622,10 +634,40 @@
             }
         });
     }
-    
+
+    function extractProjectCompany(projectText) {
+        const text = String(projectText || '');
+        const match = text.match(/-(\d{2})(?=[^\d]|$)/);
+        return match ? match[1] : null;
+    }
+
+    function applyProductiveTaskRules() {
+        const taskButtons = document.querySelectorAll('.task-btn');
+        const projectText = selectedProject ? (selectedProject.id || selectedProject.name) : '';
+        const projectCompany = extractProjectCompany(projectText);
+        const useMcRules = projectCompany && projectCompany !== '54';
+        const allowedSet = useMcRules ? ALLOWED_CODES_MC : ALLOWED_CODES_54;
+
+        taskButtons.forEach((btn) => {
+            const code = (btn.dataset.reportCostCode || '').trim().toUpperCase();
+            const taskName = (btn.dataset.task || '').trim().toUpperCase();
+            const blockedByTask = DISALLOWED_PROJECT_TASKS.has(taskName);
+            const allowed = !blockedByTask && code && allowedSet.has(code);
+            btn.classList.toggle('hidden', !allowed);
+            btn.title = '';
+            if (!allowed && selectedTask === (btn.dataset.task || '')) {
+                selectedTask = null;
+                document.getElementById('form-task').value = '';
+                btn.classList.remove('bg-accent-primary', 'border-accent-primary', 'text-white');
+                btn.classList.add('bg-slate-50', 'border-slate-200', 'text-slate-600');
+            }
+        });
+    }
+
     // Initialize mode
     {% if not active_timer %}
     setMode('productive');
+    applyProductiveTaskRules();
     {% endif %}
 </script>
 {% endblock %}

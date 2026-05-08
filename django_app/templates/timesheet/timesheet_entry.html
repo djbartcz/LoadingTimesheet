@@ -1,0 +1,505 @@
+{% extends "base.html" %}
+{% load timesheet_tags %}
+
+{% block extra_head %}
+<meta name="csrf-token" content="{{ csrf_token }}">
+{% endblock %}
+
+{% block content %}
+<div class="lg:hidden min-h-screen flex items-center justify-center px-6">
+    <div class="max-w-md w-full bg-white border border-slate-200 rounded-xl p-6 text-center shadow-sm">
+        <h2 class="text-xl font-bold text-slate-900 mb-2">Desktop Required</h2>
+        <p class="text-sm text-slate-600">Timesheet module is available only on desktop screens.</p>
+    </div>
+</div>
+
+<div class="hidden lg:block min-h-screen bg-slate-100">
+    <header class="bg-white border-b border-slate-200">
+        <div class="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
+            <div class="flex items-center gap-3">
+                <div class="p-2 bg-accent-primary/10 rounded-lg">
+                    <svg class="w-5 h-5 text-accent-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
+                    </svg>
+                </div>
+                <h1 class="font-grotesk text-2xl font-bold text-slate-900">Timesheet</h1>
+            </div>
+            <a href="{% url 'admin_dashboard' %}" class="text-sm font-medium text-accent-primary hover:text-accent-secondary transition-colors">Back to Admin</a>
+        </div>
+        <nav class="max-w-7xl mx-auto px-6 pb-3 flex items-center gap-2">
+            <a href="{% url 'timesheet_register' %}" class="px-4 py-2 rounded-lg bg-accent-primary text-white text-sm font-semibold">Register Time</a>
+            <button type="button" disabled class="px-4 py-2 rounded-lg bg-slate-200 text-slate-500 text-sm font-semibold cursor-not-allowed" title="Coming soon">Import Data</button>
+            <button type="button" disabled class="px-4 py-2 rounded-lg bg-slate-200 text-slate-500 text-sm font-semibold cursor-not-allowed" title="Coming soon">Export Data</button>
+        </nav>
+    </header>
+
+    <main class="max-w-[1500px] mx-auto px-6 py-6">
+        <div class="grid grid-cols-1 xl:grid-cols-2 gap-5">
+            <section class="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
+                <h2 class="text-lg font-bold text-slate-900 mb-4">Register Time</h2>
+
+                <form id="timesheetForm" class="space-y-4">
+                <div class="grid grid-cols-12 gap-3 items-start">
+                    <div class="col-span-5">
+                        <label class="block text-xs font-semibold text-slate-700 mb-1 uppercase tracking-wide">Work Date *</label>
+                        <input id="workDateField" type="date" name="date" required class="w-full h-12 px-3 border-2 border-slate-300 rounded-lg focus:ring-2 focus:ring-accent-primary focus:border-accent-primary">
+                    </div>
+                    <div class="col-span-5">
+                        <label class="block text-xs font-semibold text-slate-700 mb-1 uppercase tracking-wide">Employee *</label>
+                        <select id="employeeField" name="employee_id" required class="w-full h-12 px-3 border-2 border-slate-300 rounded-lg focus:ring-2 focus:ring-accent-primary focus:border-accent-primary">
+                            <option value="">Loading employees...</option>
+                            {% for emp in employees %}
+                            <option value="{{ emp.id }}" data-name="{{ emp.name|escape }}">{{ emp.name }} [{{ emp.id }}]</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-span-2">
+                        <label class="block text-xs font-semibold mb-1 opacity-0 select-none">Search</label>
+                        <button
+                            type="button"
+                            id="searchSummaryBtn"
+                            class="w-full h-12 inline-flex items-center justify-center px-3 rounded-lg bg-accent-primary text-white text-sm font-semibold hover:bg-accent-secondary transition-colors"
+                        >
+                            Search
+                        </button>
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-xs font-semibold text-slate-700 mb-2 uppercase tracking-wide">Productive / Non-Productive *</label>
+                    <div class="grid grid-cols-2 gap-3">
+                        <button type="button" id="productiveBtn" class="type-btn px-4 py-3 rounded-lg border-2 border-accent-primary bg-accent-primary text-white font-semibold uppercase tracking-wide">
+                            Productive
+                        </button>
+                        <button type="button" id="nonProductiveBtn" class="type-btn px-4 py-3 rounded-lg border-2 border-slate-300 bg-white text-slate-700 font-semibold uppercase tracking-wide">
+                            Non-Productive
+                        </button>
+                    </div>
+                    <input type="hidden" id="isNonProductive" name="is_non_productive" value="false">
+                </div>
+
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-700 mb-1 uppercase tracking-wide">Project *</label>
+                        <select name="project_id" id="projectField" class="w-full p-3 border-2 border-slate-300 rounded-lg focus:ring-2 focus:ring-accent-primary focus:border-accent-primary">
+                            <option value="">Select project</option>
+                            {% for proj in projects %}
+                            <option value="{{ proj.id }}">{{ proj.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-700 mb-1 uppercase tracking-wide">Activity Code *</label>
+                        <select name="task" id="activityCodeField" required class="w-full p-3 border-2 border-slate-300 rounded-lg focus:ring-2 focus:ring-accent-primary focus:border-accent-primary">
+                            <option value="">Select activity code</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-700 mb-1 uppercase tracking-wide">Product Code *</label>
+                        <select id="productCodeField" name="product_code" required class="w-full p-3 border-2 border-slate-300 rounded-lg focus:ring-2 focus:ring-accent-primary focus:border-accent-primary">
+                            <option value="Primary">Primary</option>
+                            <option value="Secondary">Secondary</option>
+                            <option value="Clips">Clips</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-700 mb-1 uppercase tracking-wide">Input Hours *</label>
+                        <input type="number" name="duration_hours" step="0.01" min="0" required placeholder="e.g. 6.5" class="w-full p-3 border-2 border-slate-300 rounded-lg focus:ring-2 focus:ring-accent-primary focus:border-accent-primary">
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-xs font-semibold text-slate-700 mb-1 uppercase tracking-wide">Feedback</label>
+                    <textarea id="feedbackField" name="feedback" rows="4" placeholder="Write details..." class="w-full p-3 border-2 border-slate-300 rounded-lg focus:ring-2 focus:ring-accent-primary focus:border-accent-primary resize-y"></textarea>
+                </div>
+
+                <input type="hidden" name="start_time" id="startTimeHidden" value="08:00">
+
+                <button id="submitBtn" type="submit" class="w-full px-5 py-2.5 bg-gradient-to-r from-accent-primary to-accent-secondary text-white rounded-lg font-semibold hover:shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed">
+                    Save Timesheet
+                </button>
+                <div id="formMessage" class="text-sm text-center hidden"></div>
+                </form>
+            </section>
+
+            <section class="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm h-[calc(100vh-10rem)] flex flex-col">
+                <div class="flex items-start justify-between gap-3 mb-4">
+                    <div>
+                        <h3 class="text-base font-bold text-slate-900">Employee Day Summary</h3>
+                        <p class="text-xs text-slate-600">Total hours and activity split for selected date.</p>
+                    </div>
+                </div>
+
+                <div id="summaryLoading" class="hidden text-sm text-slate-500 mb-3">Loading summary...</div>
+                <div id="summaryError" class="hidden text-sm text-red-600 mb-3"></div>
+
+                <div id="summaryContent" class="hidden space-y-3 flex-1 min-h-0 overflow-hidden">
+                    <div class="rounded-xl border border-slate-200 bg-slate-50 p-3 flex items-start justify-between gap-4">
+                        <div>
+                            <div class="text-xs uppercase tracking-wide text-slate-500 mb-1">Employee</div>
+                            <div id="summaryEmployee" class="text-sm font-semibold text-slate-900"></div>
+                            <div id="summaryDate" class="text-xs text-slate-600 mt-1"></div>
+                            <div id="summaryRecordCount" class="text-xs text-slate-600 mt-2"></div>
+                        </div>
+                        <div class="text-right">
+                            <div class="text-xs uppercase tracking-wide text-emerald-700 mb-1">Total Hours</div>
+                            <div id="summaryTotalHours" class="text-2xl font-bold text-emerald-700">0.00 h</div>
+                        </div>
+                    </div>
+
+                    <div>
+                        <h4 class="text-xs font-semibold text-slate-800 mb-2 uppercase tracking-wide">Time Registrations</h4>
+                        <div id="joinedList" class="space-y-2 overflow-y-auto max-h-[calc(100vh-21rem)] pr-1"></div>
+                    </div>
+                </div>
+
+                <div id="summaryPlaceholder" class="rounded-xl border border-dashed border-slate-300 p-4 text-sm text-slate-500">
+                    Select employee and date, then click <span class="font-semibold">Search</span>.
+                </div>
+            </section>
+        </div>
+    </main>
+</div>
+
+<script>
+const productiveTasks = [
+    {% for task in productive_tasks %}"{{ task.name|escapejs }}"{% if not forloop.last %}, {% endif %}{% endfor %}
+];
+const nonProductiveTasks = [
+    {% for task in non_productive_tasks %}"{{ task.name|escapejs }}"{% if not forloop.last %}, {% endif %}{% endfor %}
+];
+
+function getCookie(name) {
+    let cookieValue = null;
+    if (document.cookie && document.cookie !== '') {
+        const cookies = document.cookie.split(';');
+        for (let i = 0; i < cookies.length; i++) {
+            const cookie = cookies[i].trim();
+            if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                break;
+            }
+        }
+    }
+    return cookieValue;
+}
+
+function getCSRFToken() {
+    const metaTag = document.querySelector('meta[name=csrf-token]');
+    if (metaTag) {
+        return metaTag.getAttribute('content');
+    }
+    return getCookie('csrftoken');
+}
+
+function loadEmployeesFromIFS() {
+    const employeeField = document.getElementById('employeeField');
+    if (!employeeField) {
+        return;
+    }
+
+    employeeField.disabled = true;
+    employeeField.innerHTML = '<option value="">Loading employees...</option>';
+
+    fetch('{% url "ifs_employees" %}', {
+        method: 'GET',
+        credentials: 'same-origin',
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (!data.success) {
+            throw new Error(data.error || 'Failed to load employees');
+        }
+
+        employeeField.innerHTML = '<option value="">Select employee</option>';
+        (data.employees || []).forEach((employee) => {
+            const option = document.createElement('option');
+            option.value = employee.id;
+            option.textContent = employee.display || `${employee.name} [${employee.id}]`;
+            option.dataset.name = employee.name || employee.id;
+            employeeField.appendChild(option);
+        });
+
+        if (!data.employees || data.employees.length === 0) {
+            employeeField.innerHTML = '<option value="">No employees found</option>';
+        }
+    })
+    .catch(error => {
+        employeeField.innerHTML = '<option value="">Failed to load employees</option>';
+        console.error('IFS employees load error:', error);
+    })
+    .finally(() => {
+        employeeField.disabled = false;
+    });
+}
+
+function loadProjectsFromIFS() {
+    const projectField = document.getElementById('projectField');
+    if (!projectField) {
+        return;
+    }
+
+    projectField.disabled = true;
+    projectField.innerHTML = '<option value="">Loading projects...</option>';
+
+    fetch('{% url "ifs_projects" %}', {
+        method: 'GET',
+        credentials: 'same-origin',
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (!data.success) {
+            throw new Error(data.error || 'Failed to load projects');
+        }
+
+        projectField.innerHTML = '<option value="">Select project</option>';
+        (data.projects || []).forEach((project) => {
+            const option = document.createElement('option');
+            option.value = project.id;
+            option.textContent = project.display || project.name || project.id;
+            projectField.appendChild(option);
+        });
+
+        if (!data.projects || data.projects.length === 0) {
+            projectField.innerHTML = '<option value="">No projects found</option>';
+        }
+    })
+    .catch(error => {
+        projectField.innerHTML = '<option value="">Failed to load projects</option>';
+        console.error('IFS projects load error:', error);
+    })
+    .finally(() => {
+        if (document.getElementById('isNonProductive').value !== 'true') {
+            projectField.disabled = false;
+        }
+    });
+}
+
+function clearSummaryView() {
+    document.getElementById('summaryLoading').classList.add('hidden');
+    document.getElementById('summaryError').classList.add('hidden');
+    document.getElementById('summaryContent').classList.add('hidden');
+    document.getElementById('summaryPlaceholder').classList.remove('hidden');
+    document.getElementById('joinedList').innerHTML = '';
+}
+
+function renderSummary(data) {
+    const summaryContent = document.getElementById('summaryContent');
+    const summaryPlaceholder = document.getElementById('summaryPlaceholder');
+    const joinedList = document.getElementById('joinedList');
+
+    document.getElementById('summaryEmployee').textContent =
+        `${data.employee_name || data.employee_id} [${data.employee_id}]`;
+    document.getElementById('summaryDate').textContent = data.date;
+    document.getElementById('summaryTotalHours').textContent =
+        `${Number(data.total_hours || 0).toFixed(2)} h`;
+    document.getElementById('summaryRecordCount').textContent =
+        `${data.record_count || 0} row(s) from ReportItemSet, ${data.matched_rows_count || 0} matched with PartNo`;
+
+    joinedList.innerHTML = '';
+    if (data.joined_rows && data.joined_rows.length > 0) {
+        data.joined_rows.forEach((item) => {
+            const row = document.createElement('div');
+            row.className = 'rounded-lg border border-slate-200 bg-white px-3 py-2 space-y-1';
+            row.innerHTML = `
+                <div class="flex items-center justify-between gap-3">
+                    <div class="text-sm text-slate-800 truncate">${item.description || 'No description'}</div>
+                    <div class="text-sm font-semibold text-slate-900 whitespace-nowrap">${Number(item.hours || 0).toFixed(2)} h</div>
+                </div>
+                <div class="text-xs text-slate-500">${item.label || '-'} | ${item.organization || '-'}</div>
+                <div class="text-xs text-slate-600">
+                    Part: <span class="font-medium">${item.part_no || '-'}</span>
+                    | WorkCenter: <span class="font-medium">${item.work_center_no || '-'}</span>
+                    | TransactionId: <span class="font-medium">${item.transaction_id || item.report_sequence || '-'}</span>
+                </div>
+            `;
+            joinedList.appendChild(row);
+        });
+    } else {
+        const emptyRow = document.createElement('div');
+        emptyRow.className = 'rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600';
+        emptyRow.textContent = 'No report items found in selected range.';
+        joinedList.appendChild(emptyRow);
+    }
+
+    summaryPlaceholder.classList.add('hidden');
+    summaryContent.classList.remove('hidden');
+}
+
+function loadEmployeeSummary() {
+    const dateValue = document.getElementById('workDateField').value;
+    const employeeField = document.getElementById('employeeField');
+    const employeeId = employeeField.value;
+    const selectedOption =
+        employeeField.selectedIndex >= 0
+            ? employeeField.options[employeeField.selectedIndex]
+            : null;
+    const employeeName = selectedOption
+        ? (selectedOption.dataset.name || '')
+        : '';
+
+    const loadingEl = document.getElementById('summaryLoading');
+    const errorEl = document.getElementById('summaryError');
+    const summaryContent = document.getElementById('summaryContent');
+    const summaryPlaceholder = document.getElementById('summaryPlaceholder');
+
+    if (!dateValue || !employeeId) {
+        errorEl.textContent = 'Please select both date and employee before searching.';
+        errorEl.classList.remove('hidden');
+        summaryContent.classList.add('hidden');
+        summaryPlaceholder.classList.remove('hidden');
+        return;
+    }
+
+    loadingEl.classList.remove('hidden');
+    errorEl.classList.add('hidden');
+    summaryContent.classList.add('hidden');
+    summaryPlaceholder.classList.add('hidden');
+
+    const params = new URLSearchParams({
+        date: dateValue,
+        employee_id: employeeId,
+        employee_name: employeeName,
+    });
+
+    fetch(`{% url "employee_day_summary" %}?${params.toString()}`, {
+        method: 'GET',
+        credentials: 'same-origin',
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (!data.success) {
+            throw new Error(data.error || 'Failed to load summary');
+        }
+        renderSummary(data);
+    })
+    .catch(error => {
+        errorEl.textContent = error.message || 'Failed to load summary.';
+        errorEl.classList.remove('hidden');
+        summaryPlaceholder.classList.remove('hidden');
+    })
+    .finally(() => {
+        loadingEl.classList.add('hidden');
+    });
+}
+
+function setType(isNonProductive) {
+    const productiveBtn = document.getElementById('productiveBtn');
+    const nonProductiveBtn = document.getElementById('nonProductiveBtn');
+    const hiddenType = document.getElementById('isNonProductive');
+    const activityCodeField = document.getElementById('activityCodeField');
+    const projectField = document.getElementById('projectField');
+
+    hiddenType.value = isNonProductive ? 'true' : 'false';
+
+    if (isNonProductive) {
+        productiveBtn.className = 'type-btn px-4 py-3 rounded-lg border-2 border-slate-300 bg-white text-slate-700 font-semibold uppercase tracking-wide';
+        nonProductiveBtn.className = 'type-btn px-4 py-3 rounded-lg border-2 border-accent-primary bg-accent-primary text-white font-semibold uppercase tracking-wide';
+        projectField.value = '';
+        projectField.disabled = true;
+        projectField.classList.add('bg-slate-100', 'cursor-not-allowed', 'opacity-60');
+    } else {
+        productiveBtn.className = 'type-btn px-4 py-3 rounded-lg border-2 border-accent-primary bg-accent-primary text-white font-semibold uppercase tracking-wide';
+        nonProductiveBtn.className = 'type-btn px-4 py-3 rounded-lg border-2 border-slate-300 bg-white text-slate-700 font-semibold uppercase tracking-wide';
+        projectField.disabled = false;
+        projectField.classList.remove('bg-slate-100', 'cursor-not-allowed', 'opacity-60');
+    }
+
+    const tasks = isNonProductive ? nonProductiveTasks : productiveTasks;
+    activityCodeField.innerHTML = '<option value="">Select activity code</option>';
+    tasks.forEach((taskName) => {
+        const option = document.createElement('option');
+        option.value = taskName;
+        option.textContent = taskName;
+        activityCodeField.appendChild(option);
+    });
+}
+
+document.getElementById('productiveBtn').addEventListener('click', function() {
+    setType(false);
+});
+
+document.getElementById('nonProductiveBtn').addEventListener('click', function() {
+    setType(true);
+});
+
+document.getElementById('timesheetForm').addEventListener('submit', function(e) {
+    e.preventDefault();
+
+    const submitBtn = document.getElementById('submitBtn');
+    const message = document.getElementById('formMessage');
+    const formData = new FormData(this);
+    const payload = {};
+    for (const [key, value] of formData.entries()) {
+        payload[key] = value;
+    }
+    const employeeField = document.getElementById('employeeField');
+    const selectedEmployeeOption =
+        employeeField && employeeField.selectedIndex >= 0
+            ? employeeField.options[employeeField.selectedIndex]
+            : null;
+    payload.employee_name = selectedEmployeeOption
+        ? (selectedEmployeeOption.dataset.name || selectedEmployeeOption.textContent)
+        : '';
+
+    payload.is_non_productive = payload.is_non_productive === 'true';
+
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Saving...';
+    message.classList.add('hidden');
+
+    fetch('{% url "create_time_record" %}', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': getCSRFToken(),
+        },
+        body: JSON.stringify(payload),
+        credentials: 'same-origin',
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            message.textContent = 'Timesheet record saved successfully.';
+            message.className = 'text-sm text-center text-green-600 font-medium';
+            message.classList.remove('hidden');
+            this.reset();
+            const dateInput = this.querySelector('input[name="date"]');
+            if (dateInput) {
+                dateInput.value = new Date().toISOString().split('T')[0];
+            }
+            document.getElementById('startTimeHidden').value = '08:00';
+            setType(false);
+        } else {
+            message.textContent = data.error || 'Failed to save timesheet record.';
+            message.className = 'text-sm text-center text-red-600 font-medium';
+            message.classList.remove('hidden');
+        }
+    })
+    .catch(error => {
+        message.textContent = 'Error: ' + error.message;
+        message.className = 'text-sm text-center text-red-600 font-medium';
+        message.classList.remove('hidden');
+    })
+    .finally(() => {
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Save Timesheet';
+    });
+});
+
+document.addEventListener('DOMContentLoaded', function() {
+    const dateInput = document.querySelector('input[name="date"]');
+    if (dateInput && !dateInput.value) {
+        dateInput.value = new Date().toISOString().split('T')[0];
+    }
+    setType(false);
+    loadEmployeesFromIFS();
+    loadProjectsFromIFS();
+    clearSummaryView();
+    document.getElementById('searchSummaryBtn').addEventListener('click', loadEmployeeSummary);
+});
+</script>
+{% endblock %}

@@ -1,0 +1,123 @@
+{
+  "PACK": {
+    "report_cost_name": "Picking and Packing",
+    "activity_name": "VYCHYSTÁVÁNÍ",
+    "activity_aliases": [
+      "BALENÍ"
+    ],
+    "is_non_productive": false
+  },
+  "LOAD": {
+    "report_cost_name": "Truck loading and handling",
+    "activity_name": "NAKLÁDKA",
+    "activity_aliases": [
+      "PŘEVÁŽENÍ",
+      "VYKLÁDKA",
+      "MANIPULACE"
+    ],
+    "is_non_productive": false
+  },
+  "PRODSCHED": {
+    "report_cost_name": "Production Scheduling",
+    "activity_name": "PRODSCHED",
+    "is_non_productive": false
+  },
+  "PRODSV": {
+    "report_cost_name": "Production Supervision",
+    "activity_name": "PRODSV",
+    "is_non_productive": false
+  },
+  "ADM": {
+    "report_cost_name": "Administrative",
+    "activity_name": "ADM",
+    "is_non_productive": true
+  },
+  "PM": {
+    "report_cost_name": "Project management",
+    "activity_name": "PM",
+    "is_non_productive": true
+  },
+  "PRADM": {
+    "report_cost_name": "Production Administrative",
+    "activity_name": "PRADM",
+    "activity_aliases": [
+      "ADMINISTRATIVA",
+      "ADM"
+    ],
+    "is_non_productive": true
+  },
+  "PRSCR": {
+    "report_cost_name": "Production Scrap",
+    "activity_name": "PRSCR",
+    "activity_aliases": [
+      "PRDSCR",
+      "ŠROT",
+      "SCRAP"
+    ],
+    "is_non_productive": true
+  },
+  "PRTR": {
+    "report_cost_name": "Production Transporting",
+    "activity_name": "PRTR",
+    "is_non_productive": true
+  },
+  "PRT": {
+    "report_cost_name": "Production Training",
+    "activity_name": "PRT",
+    "is_non_productive": true
+  },
+  "PRINV": {
+    "report_cost_name": "Production Inventory",
+    "activity_name": "PRINV",
+    "activity_aliases": [
+      "PRINVPRW",
+      "PRW",
+      "SKLAD"
+    ],
+    "is_non_productive": true
+  },
+  "PRCLA": {
+    "report_cost_name": "Production Cleaning",
+    "activity_name": "PRCLA",
+    "is_non_productive": true
+  },
+  "PRCAR": {
+    "report_cost_name": "Production CAR",
+    "activity_name": "PRCAR",
+    "is_non_productive": true
+  },
+  "PRUNL": {
+    "report_cost_name": "Production Unloading",
+    "activity_name": "PRUNL",
+    "activity_aliases": [
+      "VYKLÁDKA"
+    ],
+    "is_non_productive": true
+  },
+  "PRMAN": {
+    "report_cost_name": "Production Manipulation",
+    "activity_name": "PRMAN",
+    "activity_aliases": [
+      "MANIPULACE"
+    ],
+    "is_non_productive": true
+  },
+  "PRMS": {
+    "report_cost_name": "Production MS",
+    "activity_name": "PRMS",
+    "is_non_productive": true
+  },
+  "PRDT": {
+    "report_cost_name": "Production Downtime",
+    "activity_name": "PRDT",
+    "is_non_productive": true
+  },
+  "PRDSCR": {
+    "report_cost_name": "Production Scrap",
+    "activity_name": "PRDSCR",
+    "activity_aliases": [
+      "PRSCR"
+    ],
+    "is_non_productive": true
+  }
+}
