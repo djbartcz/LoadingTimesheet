@@ -1536,7 +1536,11 @@ def refresh_master_data_from_ifs(request):
             (
                 "https://groupebriand.ifs.cloud/main/ifsapplications/"
                 "projection/v1/ShopOrdersHandling.svc/ShopOrds?"
-                "$orderby=RevisedDueDate"
+                "$filter=Objstate%20eq%20IfsApp.ShopOrdersHandling.ShopOrdState%27Planned%27"
+                "%20or%20Objstate%20eq%20IfsApp.ShopOrdersHandling.ShopOrdState%27Released%27"
+                "%20or%20Objstate%20eq%20IfsApp.ShopOrdersHandling.ShopOrdState%27Reserved%27"
+                "%20or%20Objstate%20eq%20IfsApp.ShopOrdersHandling.ShopOrdState%27Started%27"
+                "&$orderby=RevisedDueDate"
                 "&$select=Cf_Job_Bom_Item_Name,Cf_Project,Cf_Project_Name"
             ),
         )
