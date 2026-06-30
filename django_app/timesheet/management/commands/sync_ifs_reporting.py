@@ -1,13 +1,11 @@
 """
 Management command to sync IFS production reporting data.
 
-Calls IFS OData endpoints, stores into staging tables, and builds
-the final report_data table using validated joins.
+Calls IFS OData endpoints and stores data into staging tables.
 
 Usage:
     python manage.py sync_ifs_reporting
-    python manage.py sync_ifs_reporting --skip-report
-    python manage.py sync_ifs_reporting --only=operation_history,shop_ord
+    python manage.py sync_ifs_reporting --only=shop_ord,shop_oper_clocking
 """
 
 import logging
@@ -15,16 +13,15 @@ from datetime import datetime, timezone as dt_timezone
 from decimal import Decimal, InvalidOperation
 
 from django.core.management.base import BaseCommand
-from django.db import connection, transaction
-from django.utils import timezone
+from django.db import transaction
 
 from timesheet.ifs_api_connector import IFSAPIConnector
 from timesheet.models import (
     IfsDopHead,
+    IfsEmployeeDirectory,
     IfsInventoryTransactionHist,
-    IfsOperationHistory,
     IfsProjectTransaction,
-    IfsReportData,
+    IfsShopOperClocking,
     IfsShopOrd,
 )
 
@@ -47,20 +44,10 @@ ENDPOINTS = {
         "RevisedQtyDue,QtyComplete,RevisedDueDate,NeedDate,"
         "Cf_Project,Cf_Project_Name,Cf_Job_Bom_Item_Name,Cf_Length_Mm,"
         "luname,keyref"
-        "&use-default-filter=true&use-timezone-filter=false"
+        "&use-default-filter=false&use-timezone-filter=false"
     ),
-    "operation_history": (
-        "https://groupebriand.ifs.cloud/main/ifsapplications/"
-        "projection/v1/LaborAndOperationHistoryHandling.svc/"
-        "OperationHistorys?"
-        "$select=TransactionId,TransactionCode,Empno,EmployeeName,"
-        "OrderNo,WorkCenterNo,PartNo,PartDescription,LaborTime,"
-        "ManHours,TransactionDate,OrderType,QtyComplete,"
-        "OperStatusCode,ReversedFlag,Contract,luname,keyref"
-        "&$expand=WorkCenterRef($select=Description,Objgrants,"
-        "Contract,luname,keyref)"
-        "&use-default-filter=true&use-timezone-filter=false"
-    ),
+    # NOT USED by Production Dashboard (Daily Labour / Project Dashboard).
+    # Kept only for potential future reporting needs.
     "project_transaction": (
         "https://groupebriand.ifs.cloud/main/ifsapplications/"
         "projection/v1/ProjectTransactionsHandling.svc/"
@@ -73,6 +60,8 @@ ENDPOINTS = {
         "&$expand=EmpNoPerfRef($select=Name,PersonId,luname,keyref)"
         "&use-default-filter=true&use-timezone-filter=false"
     ),
+    # NOT USED by Production Dashboard (Daily Labour / Project Dashboard).
+    # Kept only for potential future reporting needs.
     "inventory_transaction": (
         "https://groupebriand.ifs.cloud/main/ifsapplications/"
         "projection/v1/InventoryTransactionsHistoryHandling.svc/"
@@ -85,9 +74,40 @@ ENDPOINTS = {
         "SourceRef1,SourceRef2,SourceRef3,Userid,luname,keyref"
         "&use-timezone-filter=false"
     ),
+    "employees": (
+        "https://groupebriand.ifs.cloud/main/ifsapplications/"
+        "projection/v1/EmployeesHandling.svc/CompanyPersons?"
+        "$orderby=CompanyId,EmpNo"
+        "&$select=EmpNo,EmployeeStatus,CompanyId,Fname,Lname,"
+        "InternalDisplayName,ExternalDisplayName,luname,keyref"
+        "&use-timezone-filter=false"
+    ),
+    "shop_oper_clocking": (
+        "https://groupebriand.ifs.cloud/main/ifsapplications/"
+        "projection/v1/ShopFloorClockingsHandling.svc/ShopOperClockingUtilSet?"
+        "$select=ClockingSeq,Company,OrderNo,OperationNo,TransactionId,"
+        "TransactionDate,EmployeeId,CreatedByEmployeeId,ClockingType,CrewSize,"
+        "WorkCenterNo,PartDescription,Duration,luname,keyref"
+        "&$expand=EmployeeIdRef($select=Name,luname,keyref),"
+        "ShopOrdRef($select=PartNo,luname,keyref),"
+        "ShopOrderOperationRef($select=RevisedQtyDue,luname,keyref)"
+        "&use-default-filter=true&use-timezone-filter=false"
+    ),
 }
 
-ALL_SOURCES = list(ENDPOINTS.keys())
+# Sources currently used by Production Dashboard tabs:
+# - Daily Labour: shop_oper_clocking + employees
+# - Project Dashboard: shop_ord + dop_head + shop_oper_clocking + time_records(local)
+USED_SOURCES = [
+    'shop_oper_clocking',
+    'employees',
+    'shop_ord',
+    'dop_head',
+]
+
+# Default sync updates only sources used by current dashboards.
+# Other sources can still be synced explicitly via --only=...
+ALL_SOURCES = USED_SOURCES
 
 
 def parse_decimal(value):
@@ -134,11 +154,6 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument(
-            '--skip-report',
-            action='store_true',
-            help='Skip building the final report_data table',
-        )
-        parser.add_argument(
             '--only',
             type=str,
             default='',
@@ -146,7 +161,6 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
-        skip_report = options['skip_report']
         only = [
             s.strip() for s in options['only'].split(',') if s.strip()
         ]
@@ -171,19 +185,6 @@ class Command(BaseCommand):
                     self.style.ERROR(f"    {source} FAILED: {exc}")
                 )
                 logger.error("Sync %s failed: %s", source, exc, exc_info=True)
-
-        if not skip_report:
-            self.stdout.write("  Building report_data...")
-            try:
-                count = self._build_report()
-                self.stdout.write(
-                    self.style.SUCCESS(f"    report_data: {count} rows built")
-                )
-            except Exception as exc:
-                self.stderr.write(
-                    self.style.ERROR(f"    report_data FAILED: {exc}")
-                )
-                logger.error("Build report failed: %s", exc, exc_info=True)
 
         self.stdout.write(self.style.SUCCESS("Sync complete."))
 
@@ -212,45 +213,13 @@ class Command(BaseCommand):
         handlers = {
             'dop_head': self._upsert_dop_head,
             'shop_ord': self._upsert_shop_ord,
-            'operation_history': self._upsert_operation_history,
             'project_transaction': self._upsert_project_transaction,
             'inventory_transaction': self._upsert_inventory_transaction,
+            'employees': self._upsert_employees,
+            'shop_oper_clocking': self._upsert_shop_oper_clocking,
         }
         handler = handlers[source]
         return handler(records)
-
-    def _upsert_operation_history(self, records):
-        count = 0
-        for row in records:
-            tid = row.get('TransactionId')
-            if not tid:
-                continue
-            wc_ref = row.get('WorkCenterRef') or {}
-            IfsOperationHistory.objects.update_or_create(
-                transaction_id=tid,
-                defaults={
-                    'transaction_code': row.get('TransactionCode'),
-                    'empno': row.get('Empno'),
-                    'employee_name': row.get('EmployeeName'),
-                    'order_no': row.get('OrderNo'),
-                    'work_center_no': row.get('WorkCenterNo'),
-                    'work_center_description': wc_ref.get('Description'),
-                    'part_no': row.get('PartNo'),
-                    'part_description': row.get('PartDescription'),
-                    'labor_time': parse_decimal(row.get('LaborTime')),
-                    'man_hours': parse_decimal(row.get('ManHours')),
-                    'transaction_date': parse_datetime(
-                        row.get('TransactionDate')
-                    ),
-                    'order_type': row.get('OrderType'),
-                    'qty_complete': parse_decimal(row.get('QtyComplete')),
-                    'oper_status_code': row.get('OperStatusCode'),
-                    'reversed_flag': row.get('ReversedFlag'),
-                    'contract': row.get('Contract'),
-                },
-            )
-            count += 1
-        return count
 
     def _upsert_shop_ord(self, records):
         count = 0
@@ -382,69 +351,63 @@ class Command(BaseCommand):
             count += 1
         return count
 
-    @transaction.atomic
-    def _build_report(self):
-        """Build report_data from staging tables using validated joins."""
-        IfsReportData.objects.all().delete()
-
-        sql = """
-            INSERT INTO ifs_report_data (
-                transaction_id, employee_id, employee_name,
-                transaction_code, transaction_date,
-                order_no, release_no, sequence_no, contract,
-                labor_part_no, labor_time, man_hours,
-                shop_part_no, revised_qty_due, shop_qty_complete,
-                need_date, cf_project, cf_project_name,
-                cf_job_bom_item_name,
-                inv_transaction_id, inv_transaction_code,
-                inv_date_applied, inv_part_no, inv_quantity,
-                built_at
+    def _upsert_employees(self, records):
+        count = 0
+        for row in records:
+            emp_no = str(row.get('EmpNo') or '').strip()
+            if not emp_no:
+                continue
+            IfsEmployeeDirectory.objects.update_or_create(
+                emp_no=emp_no,
+                defaults={
+                    'company_id': row.get('CompanyId'),
+                    'employee_status': row.get('EmployeeStatus'),
+                    'first_name': row.get('Fname'),
+                    'last_name': row.get('Lname'),
+                    'internal_display_name': row.get('InternalDisplayName'),
+                    'external_display_name': row.get('ExternalDisplayName'),
+                },
             )
-            SELECT
-                oh.transaction_id,
-                oh.empno,
-                oh.employee_name,
-                oh.transaction_code,
-                oh.transaction_date,
+            count += 1
+        return count
 
-                oh.order_no,
-                so.release_no,
-                so.sequence_no,
-                oh.contract,
+    def _upsert_shop_oper_clocking(self, records):
+        count = 0
+        for row in records:
+            clocking_seq = row.get('ClockingSeq')
+            if not clocking_seq:
+                continue
+            shop_op_ref = row.get('ShopOrderOperationRef') or {}
+            employee_ref = row.get('EmployeeIdRef') or {}
+            shop_ord_ref = row.get('ShopOrdRef') or {}
+            employee_id = str(row.get('EmployeeId') or '').strip() or None
+            created_by_employee_id = (
+                str(row.get('CreatedByEmployeeId') or '').strip() or None
+            )
+            IfsShopOperClocking.objects.update_or_create(
+                clocking_seq=clocking_seq,
+                defaults={
+                    'company': row.get('Company'),
+                    'order_no': row.get('OrderNo'),
+                    'operation_no': row.get('OperationNo'),
+                    'transaction_id': row.get('TransactionId'),
+                    'transaction_date': parse_date(row.get('TransactionDate')),
+                    'employee_id': employee_id,
+                    'employee_name': employee_ref.get('Name'),
+                    'created_by_employee_id': created_by_employee_id,
+                    'clocking_type': row.get('ClockingType'),
+                    'crew_size': parse_decimal(row.get('CrewSize')),
+                    'work_center_no': row.get('WorkCenterNo'),
+                    'part_no': shop_ord_ref.get('PartNo'),
+                    'part_description': row.get('PartDescription'),
+                    # Prefer ShopOrderOperationRef.RevisedQtyDue as requested.
+                    # Fallback to OperationQty when available.
+                    'operation_qty': parse_decimal(
+                        shop_op_ref.get('RevisedQtyDue') or row.get('OperationQty')
+                    ),
+                    'duration': parse_decimal(row.get('Duration')),
+                },
+            )
+            count += 1
+        return count
 
-                oh.part_no,
-                oh.labor_time,
-                oh.man_hours,
-
-                so.part_no,
-                so.revised_qty_due,
-                so.qty_complete,
-                so.need_date,
-                so.cf_project,
-                so.cf_project_name,
-                so.cf_job_bom_item_name,
-
-                inv.transaction_id,
-                inv.transaction_code,
-                inv.date_applied,
-                inv.part_no,
-                inv.quantity,
-
-                NOW()
-            FROM ifs_operation_history oh
-            LEFT JOIN ifs_shop_ord so
-                ON oh.order_no = so.order_no
-                AND so.release_no IS NOT NULL
-                AND so.sequence_no IS NOT NULL
-                AND oh.contract = so.contract
-            LEFT JOIN ifs_inventory_transaction_hist inv
-                ON oh.order_no = inv.source_ref1
-                AND oh.part_no = inv.part_no
-                AND oh.contract = inv.contract
-            WHERE oh.contract = '5402'
-              AND oh.transaction_code = 'LABOR_RPT'
-              AND oh.empno IS NOT NULL
-        """
-        with connection.cursor() as cursor:
-            cursor.execute(sql)
-            return cursor.rowcount

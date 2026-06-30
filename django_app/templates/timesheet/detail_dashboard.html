@@ -1,0 +1,557 @@
+{% extends "base.html" %}
+
+{% block extra_head %}
+<meta name="csrf-token" content="{{ csrf_token }}">
+{% endblock %}
+
+{% block content %}
+<div class="min-h-screen px-4 py-4 max-w-7xl mx-auto">
+    <!-- Header -->
+    <div class="flex items-center gap-3 mb-6">
+        <a href="{% url 'admin_dashboard' %}" class="text-accent-primary text-base font-medium hover:text-accent-secondary transition-colors flex items-center gap-1">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
+            </svg>
+            Zpět
+        </a>
+        <h1 class="flex-1 flex items-center gap-3 font-grotesk text-2xl font-bold text-slate-900">
+            <div class="p-2 bg-accent-primary/10 rounded-lg">
+                <svg class="w-6 h-6 text-accent-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                </svg>
+            </div>
+            Production Dashboard
+        </h1>
+        <div class="flex items-center gap-2">
+            <!-- Refresh Button -->
+            <button id="refreshBtn" onclick="refreshData()" class="bg-white border border-slate-200 rounded-lg p-2.5 hover:bg-slate-50 transition-colors" title="Refresh Data from IFS">
+                <svg id="refreshIcon" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                </svg>
+            </button>
+        </div>
+    </div>
+
+    <!-- Refresh Status Banner -->
+    <div id="refreshBanner" class="mb-4 hidden">
+        <div id="refreshBannerContent" class="flex items-center gap-2.5 p-3 rounded-xl text-sm font-medium"></div>
+    </div>
+
+    <!-- Tabs -->
+    <div class="flex border-b border-slate-200 mb-6">
+        <button id="tabDailyLabour" onclick="switchTab('daily_labour')" class="px-6 py-3 text-sm font-semibold border-b-2 transition-colors">
+            Daily Labour
+        </button>
+        <button id="tabProjectDashboard" onclick="switchTab('project_dashboard')" class="px-6 py-3 text-sm font-semibold border-b-2 transition-colors">
+            Project Dashboard
+        </button>
+    </div>
+
+    <!-- Daily Labour Tab -->
+    <div id="dailyLabourPanel">
+        <!-- Top Controls -->
+        <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-5">
+            <p class="text-sm text-slate-500">Records grouped by their Transaction Date — the actual work day. Click an operator to drill down.</p>
+            <div class="flex items-center gap-2">
+                <!-- View Toggle -->
+                <div class="flex bg-white border border-slate-200 rounded-lg overflow-hidden">
+                    <button id="btnEmployees" onclick="switchView('employees')" class="px-3 py-2 text-xs font-bold transition-colors">EMPLOYEES</button>
+                    <button id="btnAllRecords" onclick="switchView('all_records')" class="px-3 py-2 text-xs font-bold transition-colors">ALL RECORDS</button>
+                </div>
+                <!-- CSV Export -->
+                <button onclick="exportCSV()" class="bg-white border border-slate-200 rounded-lg px-3 py-2 flex items-center gap-1.5 hover:bg-slate-50 transition-colors text-xs font-bold text-slate-700">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
+                    </svg>
+                    CSV
+                </button>
+            </div>
+        </div>
+
+        <!-- Summary Cards -->
+        <div class="grid grid-cols-2 md:grid-cols-3 gap-3 mb-5">
+            <div class="bg-white border border-slate-200 rounded-xl p-4 relative cursor-pointer hover:border-accent-primary transition-colors" onclick="document.getElementById('datePicker').showPicker()">
+                <div class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Date</div>
+                <div class="font-grotesk text-2xl font-bold text-slate-900">{{ selected_date }}</div>
+                <div class="text-xs text-slate-400 mt-0.5">{{ days_with_data }} days with data</div>
+                <input type="date" id="datePicker" value="{{ selected_date }}" class="absolute inset-0 opacity-0 cursor-pointer w-full h-full">
+            </div>
+            <div class="bg-white border border-slate-200 rounded-xl p-4">
+                <div class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Operators</div>
+                <div class="font-grotesk text-2xl font-bold text-slate-900">{{ total_operators }}</div>
+            </div>
+            <div class="bg-white border border-slate-200 rounded-xl p-4">
+                <div class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Total Duration</div>
+                <div class="font-grotesk text-2xl font-bold text-slate-900">{{ total_labor }}<span class="text-base font-medium text-slate-500 ml-1">hours</span></div>
+                <div class="text-xs text-slate-400 mt-0.5">avg {{ avg_per_operator }} h / operator</div>
+            </div>
+        </div>
+
+        <!-- Search / Filter -->
+        <div class="mb-4">
+            <div class="relative">
+                <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+                </svg>
+                <input type="text" id="searchFilter" placeholder="Filter operators by name or ID..." class="w-full sm:w-80 pl-10 pr-4 py-2.5 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent-primary/20 focus:border-accent-primary transition-colors">
+                <span id="filterCount" class="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400"></span>
+            </div>
+        </div>
+
+        <!-- Employees View -->
+        {% if view_mode == 'employees' %}
+        <div class="bg-white border border-slate-200 rounded-xl overflow-hidden">
+            <table class="w-full text-sm">
+                <thead>
+                    <tr class="border-b border-slate-200 bg-slate-50">
+                        <th class="text-left py-3 px-4 font-semibold text-slate-600 uppercase text-xs tracking-wide">Employee</th>
+                        <th class="text-left py-3 px-4 font-semibold text-slate-600 uppercase text-xs tracking-wide">Work Centers</th>
+                        <th class="text-center py-3 px-4 font-semibold text-slate-600 uppercase text-xs tracking-wide">Records</th>
+                        <th class="text-right py-3 px-4 font-semibold text-slate-600 uppercase text-xs tracking-wide">Operation Qty</th>
+                        <th class="text-right py-3 px-4 font-semibold text-slate-600 uppercase text-xs tracking-wide">Time (H)</th>
+                        <th class="text-right py-3 px-4 font-semibold text-slate-600 uppercase text-xs tracking-wide">Time Records (H)</th>
+                        <th class="text-right py-3 px-4 font-semibold text-slate-600 uppercase text-xs tracking-wide">Total Time (H)</th>
+                    </tr>
+                </thead>
+                <tbody id="employeesBody">
+                    {% for emp in employees_data %}
+                    <tr class="employee-row border-b border-slate-100 hover:bg-slate-50 cursor-pointer transition-colors" data-empno="{{ emp.empno }}" data-name="{{ emp.name }}" onclick="toggleEmployeeDetail('{{ emp.empno }}')">
+                        <td class="py-3 px-4">
+                            <div class="flex items-center gap-2">
+                                <svg class="w-4 h-4 text-slate-400 transition-transform chevron-icon" id="chevron-{{ emp.empno }}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+                                </svg>
+                                <div>
+                                    <div class="font-semibold text-slate-900">{{ emp.name }}</div>
+                                    <div class="text-xs text-slate-400">ID {{ emp.empno }}</div>
+                                </div>
+                            </div>
+                        </td>
+                        <td class="py-3 px-4">
+                            <div class="flex flex-wrap gap-1">
+                                {% for wc in emp.work_centers %}
+                                <span class="inline-block px-2 py-0.5 bg-slate-100 text-slate-700 rounded text-xs font-medium">{{ wc }}</span>
+                                {% endfor %}
+                            </div>
+                        </td>
+                        <td class="py-3 px-4 text-center font-medium text-slate-700">{{ emp.record_count }}</td>
+                        <td class="py-3 px-4 text-right font-bold text-slate-900">{{ emp.operation_qty_sum }}</td>
+                        <td class="py-3 px-4 text-right font-bold text-slate-900">{{ emp.duration_sum }}</td>
+                        <td class="py-3 px-4 text-right font-bold text-slate-900">{{ emp.time_records_h|floatformat:2 }}</td>
+                        <td class="py-3 px-4 text-right font-bold text-slate-900">{{ emp.total_time_h|floatformat:2 }}</td>
+                    </tr>
+                    <!-- Expanded detail rows (hidden by default) -->
+                    <tr class="employee-detail hidden" id="detail-{{ emp.empno }}">
+                        <td colspan="7" class="p-0">
+                            <div class="bg-slate-50 border-t border-slate-200 px-4 py-3">
+                                <table class="w-full text-xs">
+                                    <thead>
+                                        <tr class="border-b border-slate-200">
+                                            <th class="text-left py-2 px-3 font-semibold text-slate-500 uppercase tracking-wide">Clocking Type</th>
+                                            <th class="text-left py-2 px-3 font-semibold text-slate-500 uppercase tracking-wide">Work Center</th>
+                                            <th class="text-left py-2 px-3 font-semibold text-slate-500 uppercase tracking-wide">Order</th>
+                                            <th class="text-left py-2 px-3 font-semibold text-slate-500 uppercase tracking-wide">Part</th>
+                                            <th class="text-right py-2 px-3 font-semibold text-slate-500 uppercase tracking-wide">Operation Qty</th>
+                                            <th class="text-right py-2 px-3 font-semibold text-slate-500 uppercase tracking-wide">Time (H)</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for r in emp.records %}
+                                        <tr class="border-b border-slate-100">
+                                            <td class="py-2 px-3 text-slate-600">{{ r.clocking_type }}</td>
+                                            <td class="py-2 px-3 font-medium text-slate-700">{{ r.work_center_no }}</td>
+                                            <td class="py-2 px-3 text-slate-700">{{ r.order_no }}</td>
+                                            <td class="py-2 px-3">
+                                                <div class="font-medium text-slate-800">{{ r.part_no }}</div>
+                                                {% if r.part_description %}<div class="text-slate-400 text-xs">{{ r.part_description|truncatewords:4 }}</div>{% endif %}
+                                            </td>
+                                            <td class="py-2 px-3 text-right font-semibold text-slate-700">{{ r.operation_qty_sum }}</td>
+                                            <td class="py-2 px-3 text-right font-bold text-accent-primary">{{ r.duration_sum }}</td>
+                                        </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="7" class="py-8 text-center text-slate-400">No data for this date</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+
+        <!-- All Records View -->
+        {% if view_mode == 'all_records' %}
+        <div class="bg-white border border-slate-200 rounded-xl overflow-hidden">
+            <div class="overflow-x-auto">
+                <table class="w-full text-sm">
+                    <thead>
+                        <tr class="border-b border-slate-200 bg-slate-50">
+                            <th class="text-left py-3 px-4 font-semibold text-slate-600 uppercase text-xs tracking-wide">Clocking Type</th>
+                            <th class="text-left py-3 px-4 font-semibold text-slate-600 uppercase text-xs tracking-wide">Employee</th>
+                            <th class="text-left py-3 px-4 font-semibold text-slate-600 uppercase text-xs tracking-wide">Work Center</th>
+                            <th class="text-left py-3 px-4 font-semibold text-slate-600 uppercase text-xs tracking-wide">Part</th>
+                            <th class="text-left py-3 px-4 font-semibold text-slate-600 uppercase text-xs tracking-wide">Order</th>
+                            <th class="text-right py-3 px-4 font-semibold text-slate-600 uppercase text-xs tracking-wide">Operation Qty</th>
+                            <th class="text-right py-3 px-4 font-semibold text-slate-600 uppercase text-xs tracking-wide">Time (H)</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for r in all_records_data %}
+                        <tr class="border-b border-slate-100 hover:bg-slate-50 transition-colors">
+                            <td class="py-3 px-4 text-slate-600">{{ r.clocking_type }}</td>
+                            <td class="py-3 px-4 font-medium text-slate-900">{{ r.employee_name }}</td>
+                            <td class="py-3 px-4 text-slate-700">{{ r.work_center_no }}</td>
+                            <td class="py-3 px-4">
+                                <div class="font-medium text-slate-800">{{ r.part_no }}</div>
+                                {% if r.part_description %}<div class="text-slate-400 text-xs">{{ r.part_description|truncatewords:4 }}</div>{% endif %}
+                            </td>
+                            <td class="py-3 px-4 text-slate-700">{{ r.order_no }}</td>
+                            <td class="py-3 px-4 text-right font-semibold text-slate-700">{{ r.operation_qty }}</td>
+                            <td class="py-3 px-4 text-right font-bold text-accent-primary">{{ r.duration }}</td>
+                        </tr>
+                        {% empty %}
+                        <tr>
+                            <td colspan="7" class="py-8 text-center text-slate-400">No data for this date</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Project Dashboard Tab -->
+    <div id="projectDashboardPanel" class="hidden">
+        <!-- Summary Cards -->
+        <div class="grid grid-cols-2 md:grid-cols-5 gap-3 mb-5">
+            <div class="bg-white border border-slate-200 rounded-xl p-4">
+                <div class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Projects</div>
+                <div class="font-grotesk text-2xl font-bold text-slate-900">{{ proj_count }}</div>
+            </div>
+            <div class="bg-white border border-slate-200 rounded-xl p-4">
+                <div class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Total Tons</div>
+                <div class="font-grotesk text-2xl font-bold text-slate-900">{{ proj_total_tons }}<span class="text-base font-medium text-slate-500 ml-1">tons</span></div>
+            </div>
+            <div class="bg-white border border-slate-200 rounded-xl p-4">
+                <div class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Closed (Done)</div>
+                <div class="font-grotesk text-2xl font-bold text-slate-900">{{ proj_closed_tons }}<span class="text-base font-medium text-slate-500 ml-1">tons</span></div>
+                <div class="text-xs text-slate-400 mt-0.5">{{ proj_closed_pct }}% of total</div>
+            </div>
+            <div class="bg-white border border-slate-200 rounded-xl p-4">
+                <div class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">In Production</div>
+                <div class="font-grotesk text-2xl font-bold text-slate-900">{{ proj_in_production_tons }}<span class="text-base font-medium text-slate-500 ml-1">tons</span></div>
+            </div>
+            <div class="bg-white border border-slate-200 rounded-xl p-4">
+                <div class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Productive Hours</div>
+                <div class="font-grotesk text-2xl font-bold text-slate-900">{{ proj_productive_hours }}</div>
+                <div class="text-xs text-slate-400 mt-0.5">direct {{ proj_direct_h }} + indir {{ proj_indirect_h }}</div>
+            </div>
+        </div>
+
+        <!-- Search & Sort -->
+        <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-4">
+            <div class="relative">
+                <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+                </svg>
+                <input type="text" id="projectSearch" placeholder="Search project / name..." class="pl-10 pr-4 py-2.5 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent-primary/20 focus:border-accent-primary transition-colors w-64">
+            </div>
+            <div class="flex items-center gap-2">
+                <span class="text-xs font-bold text-slate-500 uppercase">Sort</span>
+                <button onclick="sortProjects('total_tons')" class="sort-btn px-3 py-1.5 text-xs font-bold rounded-lg border border-slate-200 bg-slate-900 text-white" data-sort="total_tons">Total tons</button>
+                <button onclick="sortProjects('progress')" class="sort-btn px-3 py-1.5 text-xs font-bold rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50" data-sort="progress">Progress %</button>
+                <button onclick="sortProjects('productive_h')" class="sort-btn px-3 py-1.5 text-xs font-bold rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50" data-sort="productive_h">Productive h</button>
+                <button onclick="sortProjects('indirect_h')" class="sort-btn px-3 py-1.5 text-xs font-bold rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50" data-sort="indirect_h">Indirect h</button>
+                <button onclick="sortProjects('earliest_due')" class="sort-btn px-3 py-1.5 text-xs font-bold rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50" data-sort="earliest_due">Earliest due</button>
+                <span id="projectCount" class="text-xs text-slate-400 ml-2">{{ proj_count }} projects</span>
+            </div>
+        </div>
+
+        <!-- Projects Table -->
+        <div class="bg-white border border-slate-200 rounded-xl overflow-hidden">
+            <div class="overflow-x-auto">
+                <table class="w-full text-sm" id="projectsTable">
+                    <thead>
+                        <tr class="border-b border-slate-200 bg-slate-50">
+                            <th class="text-left py-3 px-4 font-semibold text-slate-600 uppercase text-xs tracking-wide">Project</th>
+                            <th class="text-left py-3 px-4 font-semibold text-slate-600 uppercase text-xs tracking-wide w-36">Progress</th>
+                            <th class="text-right py-3 px-4 font-semibold text-slate-600 uppercase text-xs tracking-wide">Total T</th>
+                            <th class="text-right py-3 px-4 font-semibold text-slate-600 uppercase text-xs tracking-wide">Closed T</th>
+                            <th class="text-right py-3 px-4 font-semibold text-slate-600 uppercase text-xs tracking-wide">Released T</th>
+                            <th class="text-right py-3 px-4 font-semibold text-slate-600 uppercase text-xs tracking-wide">Unreleased T</th>
+                            <th class="text-right py-3 px-4 font-semibold text-slate-600 uppercase text-xs tracking-wide">PCS</th>
+                            <th class="text-right py-3 px-4 font-semibold text-slate-600 uppercase text-xs tracking-wide">Direct H</th>
+                            <th class="text-right py-3 px-4 font-semibold text-slate-600 uppercase text-xs tracking-wide">Indirect H</th>
+                            <th class="text-right py-3 px-4 font-semibold text-slate-600 uppercase text-xs tracking-wide">Productive H</th>
+                            <th class="text-left py-3 px-4 font-semibold text-slate-600 uppercase text-xs tracking-wide">Due Range</th>
+                        </tr>
+                    </thead>
+                    <tbody id="projectsTableBody">
+                        {% for proj in projects_data %}
+                        <tr class="project-table-row border-b border-slate-100 hover:bg-slate-50 transition-colors"
+                            data-name="{{ proj.name }}"
+                            data-project="{{ proj.cf_project }}"
+                            data-total-tons="{{ proj.total_tons }}"
+                            data-progress="{{ proj.progress }}"
+                            data-productive-h="{{ proj.productive_h }}"
+                            data-indirect-h="{{ proj.indirect_h }}"
+                            data-due-range="{{ proj.due_range }}">
+                            <td class="py-3 px-4">
+                                <div class="font-semibold text-slate-900">{{ proj.cf_project }}</div>
+                                <div class="text-xs text-slate-400">{{ proj.name }}</div>
+                            </td>
+                            <td class="py-3 px-4">
+                                <div class="flex items-center gap-2">
+                                    <div class="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden">
+                                        <div class="h-full bg-accent-primary rounded-full" style="width: {{ proj.progress }}%"></div>
+                                    </div>
+                                    <span class="text-xs font-semibold text-slate-600 w-10 text-right">{{ proj.progress }}%</span>
+                                </div>
+                            </td>
+                            <td class="py-3 px-4 text-right font-semibold text-slate-900">{{ proj.total_tons }}</td>
+                            <td class="py-3 px-4 text-right font-semibold text-accent-primary">{{ proj.closed_tons }}</td>
+                            <td class="py-3 px-4 text-right text-slate-700">{{ proj.released_tons }}</td>
+                            <td class="py-3 px-4 text-right text-slate-700">{{ proj.unreleased_tons }}</td>
+                            <td class="py-3 px-4 text-right text-slate-700">{{ proj.pcs }}</td>
+                            <td class="py-3 px-4 text-right text-slate-700">{{ proj.direct_h }}</td>
+                            <td class="py-3 px-4 text-right text-slate-700">{{ proj.indirect_h }}</td>
+                            <td class="py-3 px-4 text-right font-bold text-slate-900">{{ proj.productive_h }}</td>
+                            <td class="py-3 px-4 text-slate-500 text-xs">{{ proj.due_range }}</td>
+                        </tr>
+                        {% empty %}
+                        <tr>
+                            <td colspan="11" class="py-8 text-center text-slate-400">No project data available. Run a refresh first.</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+const currentDate = '{{ selected_date }}';
+const currentView = '{{ view_mode }}';
+
+// Tab switching
+function switchTab(tab) {
+    const dailyPanel = document.getElementById('dailyLabourPanel');
+    const projectPanel = document.getElementById('projectDashboardPanel');
+    const tabDaily = document.getElementById('tabDailyLabour');
+    const tabProject = document.getElementById('tabProjectDashboard');
+
+    if (tab === 'daily_labour') {
+        dailyPanel.classList.remove('hidden');
+        projectPanel.classList.add('hidden');
+        tabDaily.classList.add('border-accent-primary', 'text-accent-primary');
+        tabDaily.classList.remove('border-transparent', 'text-slate-500');
+        tabProject.classList.remove('border-accent-primary', 'text-accent-primary');
+        tabProject.classList.add('border-transparent', 'text-slate-500');
+    } else {
+        dailyPanel.classList.add('hidden');
+        projectPanel.classList.remove('hidden');
+        tabProject.classList.add('border-accent-primary', 'text-accent-primary');
+        tabProject.classList.remove('border-transparent', 'text-slate-500');
+        tabDaily.classList.remove('border-accent-primary', 'text-accent-primary');
+        tabDaily.classList.add('border-transparent', 'text-slate-500');
+    }
+}
+
+// View toggle (Employees / All Records)
+function switchView(view) {
+    const url = new URL(window.location);
+    url.searchParams.set('view', view);
+    url.searchParams.set('date', document.getElementById('datePicker').value);
+    window.location.href = url.toString();
+}
+
+// Date picker change
+document.getElementById('datePicker').addEventListener('change', function() {
+    const url = new URL(window.location);
+    url.searchParams.set('date', this.value);
+    url.searchParams.set('view', currentView);
+    window.location.href = url.toString();
+});
+
+// Employee drill-down toggle
+function toggleEmployeeDetail(empno) {
+    const detail = document.getElementById('detail-' + empno);
+    const chevron = document.getElementById('chevron-' + empno);
+    if (detail.classList.contains('hidden')) {
+        detail.classList.remove('hidden');
+        chevron.style.transform = 'rotate(90deg)';
+    } else {
+        detail.classList.add('hidden');
+        chevron.style.transform = 'rotate(0deg)';
+    }
+}
+
+// Search filter
+document.getElementById('searchFilter').addEventListener('input', function() {
+    const query = this.value.toLowerCase();
+    const rows = document.querySelectorAll('.employee-row');
+    let visible = 0;
+    rows.forEach(row => {
+        const name = (row.dataset.name || '').toLowerCase();
+        const empno = (row.dataset.empno || '').toLowerCase();
+        const match = name.includes(query) || empno.includes(query);
+        row.style.display = match ? '' : 'none';
+        const detail = document.getElementById('detail-' + row.dataset.empno);
+        if (detail && !match) detail.classList.add('hidden');
+        if (match) visible++;
+    });
+    document.getElementById('filterCount').textContent = query ? visible + ' of {{ employees_data|length }} operators' : '';
+});
+
+// View toggle button styling
+function updateViewButtons() {
+    const btnEmp = document.getElementById('btnEmployees');
+    const btnAll = document.getElementById('btnAllRecords');
+    if (currentView === 'employees') {
+        btnEmp.classList.add('bg-slate-900', 'text-white');
+        btnEmp.classList.remove('text-slate-600', 'hover:bg-slate-50');
+        btnAll.classList.remove('bg-slate-900', 'text-white');
+        btnAll.classList.add('text-slate-600', 'hover:bg-slate-50');
+    } else {
+        btnAll.classList.add('bg-slate-900', 'text-white');
+        btnAll.classList.remove('text-slate-600', 'hover:bg-slate-50');
+        btnEmp.classList.remove('bg-slate-900', 'text-white');
+        btnEmp.classList.add('text-slate-600', 'hover:bg-slate-50');
+    }
+}
+
+// Refresh data
+function refreshData() {
+    const btn = document.getElementById('refreshBtn');
+    const icon = document.getElementById('refreshIcon');
+    const banner = document.getElementById('refreshBanner');
+    const content = document.getElementById('refreshBannerContent');
+
+    btn.disabled = true;
+    icon.classList.add('spinning');
+
+    banner.classList.remove('hidden');
+    content.className = 'flex items-center gap-2.5 p-3 rounded-xl text-sm font-medium bg-blue-50 border border-blue-200 text-blue-700';
+    content.innerHTML = '<svg class="w-4 h-4 spinning" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg><span>Refreshing data from IFS... This may take a minute.</span>';
+
+    fetch('{% url "detail_dashboard_refresh" %}', {
+        method: 'POST',
+        headers: {
+            'X-CSRFToken': document.querySelector('meta[name="csrf-token"]').getAttribute('content'),
+            'Content-Type': 'application/json',
+        },
+        credentials: 'same-origin',
+    })
+    .then(res => res.json())
+    .then(data => {
+        if (data.success) {
+            content.className = 'flex items-center gap-2.5 p-3 rounded-xl text-sm font-medium bg-green-50 border border-green-200 text-green-700';
+            content.innerHTML = '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg><span>Data refresh complete! Reloading...</span>';
+            setTimeout(() => window.location.reload(), 1500);
+        } else {
+            content.className = 'flex items-center gap-2.5 p-3 rounded-xl text-sm font-medium bg-red-50 border border-red-200 text-red-700';
+            content.innerHTML = '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg><span>Refresh failed: ' + (data.error || 'Unknown error') + '</span>';
+        }
+    })
+    .catch(err => {
+        content.className = 'flex items-center gap-2.5 p-3 rounded-xl text-sm font-medium bg-red-50 border border-red-200 text-red-700';
+        content.innerHTML = '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg><span>Network error: ' + err.message + '</span>';
+    })
+    .finally(() => {
+        btn.disabled = false;
+        icon.classList.remove('spinning');
+    });
+}
+
+// CSV Export
+function exportCSV() {
+    const table = document.querySelector('#dailyLabourPanel table');
+    if (!table) return;
+    const rows = table.querySelectorAll('thead tr, tbody > tr.employee-row, tbody > tr:not(.employee-detail):not(.employee-row)');
+    let csv = '';
+    rows.forEach(row => {
+        const cells = row.querySelectorAll('th, td');
+        const rowData = [];
+        cells.forEach(cell => {
+            let text = cell.innerText.replace(/\n/g, ' ').replace(/"/g, '""').trim();
+            rowData.push('"' + text + '"');
+        });
+        if (rowData.length) csv += rowData.join(',') + '\n';
+    });
+    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = 'daily_labour_' + currentDate + '.csv';
+    link.click();
+}
+
+// Project search
+document.getElementById('projectSearch').addEventListener('input', function() {
+    const query = this.value.toLowerCase();
+    const rows = document.querySelectorAll('.project-table-row');
+    let visible = 0;
+    rows.forEach(row => {
+        const name = (row.dataset.name || '').toLowerCase();
+        const project = (row.dataset.project || '').toLowerCase();
+        const match = name.includes(query) || project.includes(query);
+        row.style.display = match ? '' : 'none';
+        if (match) visible++;
+    });
+    document.getElementById('projectCount').textContent = visible + ' projects';
+});
+
+// Project sort
+function sortProjects(field) {
+    const tbody = document.getElementById('projectsTableBody');
+    const rows = Array.from(tbody.querySelectorAll('.project-table-row'));
+
+    rows.sort((a, b) => {
+        let aVal, bVal;
+        if (field === 'total_tons') {
+            aVal = parseFloat(a.dataset.totalTons) || 0;
+            bVal = parseFloat(b.dataset.totalTons) || 0;
+        } else if (field === 'progress') {
+            aVal = parseFloat(a.dataset.progress) || 0;
+            bVal = parseFloat(b.dataset.progress) || 0;
+        } else if (field === 'productive_h') {
+            aVal = parseFloat(a.dataset.productiveH) || 0;
+            bVal = parseFloat(b.dataset.productiveH) || 0;
+        } else if (field === 'indirect_h') {
+            aVal = parseFloat(a.dataset.indirectH) || 0;
+            bVal = parseFloat(b.dataset.indirectH) || 0;
+        } else if (field === 'earliest_due') {
+            aVal = a.dataset.dueRange || 'z';
+            bVal = b.dataset.dueRange || 'z';
+            return aVal.localeCompare(bVal);
+        }
+        return bVal - aVal;
+    });
+
+    rows.forEach(row => tbody.appendChild(row));
+
+    // Update button styling
+    document.querySelectorAll('.sort-btn').forEach(btn => {
+        if (btn.dataset.sort === field) {
+            btn.classList.add('bg-slate-900', 'text-white');
+            btn.classList.remove('bg-white', 'text-slate-600', 'hover:bg-slate-50');
+        } else {
+            btn.classList.remove('bg-slate-900', 'text-white');
+            btn.classList.add('bg-white', 'text-slate-600', 'hover:bg-slate-50');
+        }
+    });
+}
+
+// Init
+document.addEventListener('DOMContentLoaded', function() {
+    switchTab('daily_labour');
+    updateViewButtons();
+});
+</script>
+{% endblock %}

@@ -11,13 +11,21 @@ from functools import wraps
 import pytz
 import json
 from urllib.parse import quote
-from .models import ActiveTimer, TimeRecord, Employee, Project, Task
+from .models import (
+    ActiveTimer, TimeRecord, Employee, Project, Task,
+    IfsShopOrd, IfsDopHead, IfsEmployeeDirectory,
+    IfsShopOperClocking, InventoryScan,
+)
 from django.apps import apps
+from django.db.models import Sum, Count, Min, Max, Q, Value
+from django.db.models.functions import TruncDate, Coalesce, NullIf, Trim
 from openpyxl import Workbook
-from io import BytesIO
+from io import BytesIO, StringIO
 from django.db import transaction
+from django.core.management import call_command
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.decorators import login_required as django_login_required
+from django.views.decorators.http import require_GET, require_POST
 from django.contrib.auth.models import User, Group
 from .ifs_api_connector import IFSAPIConnector
 from .view_utils import get_non_prod_base_payload, get_prod_base_payload
@@ -3735,3 +3743,451 @@ def create_time_record(request):
             'success': False,
             'error': f'Chyba při vytváření záznamu: {error_msg}'
         }, status=500, json_dumps_params={'ensure_ascii': False})
+
+
+# =============================================================================
+# Detail Dashboard (IFS Production Reporting)
+# =============================================================================
+
+def detail_dashboard(request):
+    """Dashboard view with Daily Labour and Project Dashboard tabs."""
+
+    date_str = request.GET.get('date', '')
+    view_mode = request.GET.get('view', 'employees')
+
+    base_qs = IfsShopOperClocking.objects.all()
+
+    available_dates = (
+        base_qs
+        .exclude(transaction_date__isnull=True)
+        .values_list('transaction_date', flat=True)
+        .distinct()
+        .order_by('-transaction_date')
+    )
+    available_dates = list(available_dates)
+
+    if date_str:
+        try:
+            selected_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+        except ValueError:
+            selected_date = available_dates[0] if available_dates else timezone.now().date()
+    else:
+        selected_date = available_dates[0] if available_dates else timezone.now().date()
+
+    records_qs = base_qs.filter(
+        transaction_date=selected_date,
+        crew_size__gt=0,
+    ).annotate(
+        # Group key: Employee (empno) first, else Created by Employee
+        group_employee_id=Coalesce(
+            NullIf(Trim('employee_id'), Value('')),
+            NullIf(Trim('created_by_employee_id'), Value('')),
+        ),
+    ).exclude(
+        group_employee_id__isnull=True
+    ).exclude(
+        group_employee_id=''
+    )
+
+    total_records = records_qs.count()
+    agg = records_qs.aggregate(
+        total_duration=Sum('duration'),
+        total_operation_qty=Sum('operation_qty'),
+    )
+    total_labor = float(agg['total_duration'] or 0)
+    total_man_hours = float(agg['total_operation_qty'] or 0)
+
+    operators_qs = records_qs.values('group_employee_id').distinct()
+    total_operators = operators_qs.count()
+    avg_per_operator = total_labor / total_operators if total_operators else 0
+
+    # Local tracked time from time_records, grouped by employee and end date.
+    time_records_hours_by_employee = {
+        (str(row['employee_id']).strip() if row.get('employee_id') else ''): (
+            float(row['total_seconds'] or 0) / 3600.0
+        )
+        for row in (
+            TimeRecord.objects
+            .filter(end_time__isnull=False, duration_seconds__gt=0, end_time__date=selected_date)
+            .values('employee_id')
+            .annotate(total_seconds=Sum('duration_seconds'))
+        )
+    }
+
+    ifs_employee_names = {
+        row['emp_no']: (
+            row['internal_display_name']
+            or row['external_display_name']
+            or f"{row['first_name'] or ''} {row['last_name'] or ''}".strip()
+        )
+        for row in IfsEmployeeDirectory.objects.values(
+            'emp_no',
+            'internal_display_name',
+            'external_display_name',
+            'first_name',
+            'last_name',
+        )
+    }
+
+    employees_data = []
+    if view_mode == 'employees':
+        emp_agg = (
+            records_qs.values('group_employee_id')
+            .annotate(
+                employee_name=Max('employee_name'),
+                record_count=Count('clocking_seq'),
+                duration_sum=Sum('duration'),
+                operation_qty_sum=Sum('operation_qty'),
+            )
+            .order_by('-duration_sum')
+        )
+        for emp in emp_agg:
+            emp_id = (emp['group_employee_id'] or '').strip()
+            wc_list = list(
+                records_qs.filter(group_employee_id__iexact=emp_id)
+                .values_list('work_center_no', flat=True)
+                .distinct()
+            )
+            wc_list = [w for w in wc_list if w]
+            emp_records = list(
+                records_qs.filter(group_employee_id__iexact=emp_id)
+                .values(
+                    'clocking_type',
+                    'work_center_no',
+                    'part_no',
+                    'part_description',
+                    'order_no',
+                )
+                .annotate(
+                    operation_qty_sum=Sum('operation_qty'),
+                    duration_sum=Sum('duration'),
+                )
+                .order_by('order_no')
+            )
+            for r in emp_records:
+                r['operation_qty_sum'] = float(r['operation_qty_sum'] or 0)
+                r['duration_sum'] = float(r['duration_sum'] or 0)
+
+            employees_data.append({
+                'empno': emp_id,
+                'name': emp.get('employee_name') or ifs_employee_names.get(emp_id) or emp_id,
+                'work_centers': wc_list,
+                'record_count': emp['record_count'],
+                'duration_sum': float(emp['duration_sum'] or 0),
+                'time_records_h': time_records_hours_by_employee.get(emp_id, 0),
+                'total_time_h': float(emp['duration_sum'] or 0) + time_records_hours_by_employee.get(emp_id, 0),
+                'operation_qty_sum': float(emp['operation_qty_sum'] or 0),
+                'records': emp_records,
+            })
+
+    all_records_data = []
+    if view_mode == 'all_records':
+        all_records_data = list(
+            records_qs.values(
+                'transaction_id', 'group_employee_id',
+                'transaction_date', 'clocking_type',
+                'work_center_no', 'part_no', 'part_description',
+                'order_no', 'operation_qty', 'duration',
+            ).order_by('transaction_date')
+        )
+        for r in all_records_data:
+            r['duration'] = float(r['duration'] or 0)
+            r['operation_qty'] = float(r['operation_qty'] or 0)
+            gid = (r.get('group_employee_id') or '').strip()
+            r['employee_name'] = ifs_employee_names.get(gid) or gid
+
+    days_with_data = len(available_dates)
+
+    # =========================================================================
+    # Project Dashboard tab data
+    # =========================================================================
+
+    # Get weight per project from DopHead
+    dop_weights = {}
+    dop_agg = (
+        IfsDopHead.objects
+        .exclude(cf_project__isnull=True)
+        .exclude(cf_project='')
+        .values('cf_project')
+        .annotate(total_weight=Sum('cf_total_weight_kg'))
+    )
+    for d in dop_agg:
+        dop_weights[d['cf_project']] = float(d['total_weight'] or 0)
+
+    # Get hours per project from OperationHistory via ShopOrd mapping
+    order_to_project = dict(
+        IfsShopOrd.objects
+        .exclude(cf_project__isnull=True)
+        .exclude(cf_project='')
+        .values_list('order_no', 'cf_project')
+        .distinct()
+    )
+
+    # Get shop order aggregates per project
+    shop_agg = list(
+        IfsShopOrd.objects
+        .exclude(cf_project__isnull=True)
+        .exclude(cf_project='')
+        .values('cf_project', 'cf_project_name')
+        .annotate(
+            total_qty=Sum('revised_qty_due'),
+            completed_qty=Sum('qty_complete'),
+            pcs=Count('order_no', distinct=True),
+            earliest_due=Min('need_date'),
+            latest_due=Max('need_date'),
+        )
+        .order_by('-total_qty')
+    )
+    all_cf_projects = [p['cf_project'] for p in shop_agg if p['cf_project']]
+
+    # Direct hours: from Shop Oper Clocking (Labor clockings via shop orders)
+    hours_qs = (
+        IfsShopOperClocking.objects
+        .filter(order_no__in=order_to_project.keys())
+        .filter(clocking_type='Labor')
+        .values('order_no')
+        .annotate(hours=Sum('duration'))
+    )
+    project_direct_hours = {}
+    for row in hours_qs:
+        proj = order_to_project.get(row['order_no'])
+        if not proj:
+            continue
+        project_direct_hours[proj] = project_direct_hours.get(proj, 0) + float(row['hours'] or 0)
+
+    # Indirect hours: from TimeRecord where project_id contains the project code
+    # project_id format example: "200532-K2 - 47643E1-54 - SID SUD EST - SID SUD EST"
+    # cf_project format example: "47643E1-54"
+    indirect_qs = (
+        TimeRecord.objects
+        .exclude(project_id__isnull=True)
+        .exclude(project_id='')
+        .filter(duration_seconds__gt=0)
+        .values('project_id')
+        .annotate(total_seconds=Sum('duration_seconds'))
+    )
+    project_indirect_hours = {}
+    for row in indirect_qs:
+        pid = row['project_id'] or ''
+        hours = float(row['total_seconds'] or 0) / 3600.0
+        for cf_proj in all_cf_projects:
+            if cf_proj and cf_proj in pid:
+                project_indirect_hours[cf_proj] = project_indirect_hours.get(cf_proj, 0) + hours
+                break
+        else:
+            # Try partial match: project code without contract suffix (e.g. "47643E1")
+            for cf_proj in all_cf_projects:
+                base_code = cf_proj.rsplit('-', 1)[0] if '-' in cf_proj else cf_proj
+                if base_code and len(base_code) > 4 and base_code in pid:
+                    project_indirect_hours[cf_proj] = project_indirect_hours.get(cf_proj, 0) + hours
+                    break
+
+    projects_data = []
+    total_project_tons = 0
+    total_closed_tons = 0
+    total_in_production_tons = 0
+    total_productive_hours = 0
+    total_direct_h = 0
+    total_indirect_h = 0
+
+    for proj in shop_agg:
+        cf_proj = proj['cf_project']
+        total_qty = float(proj['total_qty'] or 0)
+        completed_qty = float(proj['completed_qty'] or 0)
+        progress = (completed_qty / total_qty * 100) if total_qty > 0 else 0
+
+        weight_kg = dop_weights.get(cf_proj, 0)
+        weight_tons = weight_kg / 1000.0
+        closed_tons = weight_tons * (progress / 100.0)
+        released_tons = weight_tons - closed_tons
+        unreleased_tons = 0
+
+        direct_h = project_direct_hours.get(cf_proj, 0)
+        indirect_h = project_indirect_hours.get(cf_proj, 0)
+        productive_h = direct_h + indirect_h
+
+        earliest = proj['earliest_due']
+        latest = proj['latest_due']
+        due_range = ''
+        if earliest and latest:
+            due_range = f"{earliest.strftime('%Y-%m-%d')} → {latest.strftime('%Y-%m-%d')}"
+        elif earliest:
+            due_range = earliest.strftime('%Y-%m-%d')
+
+        total_project_tons += weight_tons
+        total_closed_tons += closed_tons
+        total_in_production_tons += released_tons
+        total_direct_h += direct_h
+        total_indirect_h += indirect_h
+        total_productive_hours += productive_h
+
+        projects_data.append({
+            'cf_project': cf_proj,
+            'name': proj['cf_project_name'] or cf_proj,
+            'progress': round(progress, 1),
+            'total_tons': round(weight_tons, 2),
+            'closed_tons': round(closed_tons, 2),
+            'released_tons': round(released_tons, 2),
+            'unreleased_tons': round(unreleased_tons, 2),
+            'pcs': proj['pcs'],
+            'direct_h': round(direct_h, 2),
+            'indirect_h': round(indirect_h, 2),
+            'productive_h': round(productive_h, 2),
+            'due_range': due_range,
+        })
+
+    closed_pct = (total_closed_tons / total_project_tons * 100) if total_project_tons > 0 else 0
+
+    context = {
+        'selected_date': selected_date.strftime('%Y-%m-%d'),
+        'view_mode': view_mode,
+        'days_with_data': days_with_data,
+        'total_operators': total_operators,
+        'total_records': total_records,
+        'total_labor': round(total_labor, 2),
+        'total_man_hours': round(total_man_hours, 2),
+        'avg_per_operator': round(avg_per_operator, 1),
+        'employees_data': employees_data,
+        'all_records_data': all_records_data,
+        'available_dates': [d.strftime('%Y-%m-%d') for d in available_dates],
+        # Project dashboard
+        'projects_data': projects_data,
+        'proj_count': len(projects_data),
+        'proj_total_tons': round(total_project_tons, 2),
+        'proj_closed_tons': round(total_closed_tons, 2),
+        'proj_closed_pct': round(closed_pct, 1),
+        'proj_in_production_tons': round(total_in_production_tons, 2),
+        'proj_productive_hours': round(total_productive_hours, 2),
+        'proj_direct_h': round(total_direct_h, 2),
+        'proj_indirect_h': round(total_indirect_h, 2),
+    }
+    return render(request, 'timesheet/detail_dashboard.html', context)
+
+
+def detail_dashboard_refresh(request):
+    """Trigger sync_ifs_reporting management command and return status."""
+
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'POST required'}, status=405)
+
+    try:
+        out = StringIO()
+        call_command('sync_ifs_reporting', stdout=out)
+        output = out.getvalue()
+        return JsonResponse({'success': True, 'message': 'Data refresh complete', 'output': output})
+    except Exception as e:
+        logger.exception("detail_dashboard_refresh failed")
+        return JsonResponse({'success': False, 'error': str(e)}, status=500)
+
+
+def parse_barcode(raw):
+    """Parse semicolon-separated stock barcode into field dict."""
+    parts = [p.strip() for p in raw.split(';')]
+    while parts and parts[-1] == '':
+        parts.pop()
+
+    if len(parts) == 6:
+        return {
+            'part_no': parts[0],
+            'part_description': parts[1],
+            'lot_no': parts[2],
+            'wdr': parts[3],
+            'length': parts[4],
+            'width': None,
+            'handling_unit': parts[5],
+        }
+    if len(parts) == 7:
+        return {
+            'part_no': parts[0],
+            'part_description': parts[1],
+            'lot_no': parts[2],
+            'wdr': parts[3],
+            'length': parts[4],
+            'width': parts[5],
+            'handling_unit': parts[6],
+        }
+    raise ValueError(
+        f'Expected 6 or 7 fields, got {len(parts)}. '
+        'Format: PART_NO;DESCRIPTION;LOT;WDR;LENGTH;[WIDTH;]HANDLING_UNIT'
+    )
+
+
+def _scan_to_dict(scan):
+    return {
+        'id': scan.id,
+        'part_no': scan.part_no,
+        'part_description': scan.part_description,
+        'lot_no': scan.lot_no,
+        'wdr': scan.wdr,
+        'length': scan.length,
+        'width': scan.width,
+        'handling_unit': scan.handling_unit,
+        'raw_barcode': scan.raw_barcode,
+        'scanned_at': scan.scanned_at.isoformat(),
+    }
+
+
+@login_required
+def stock_scanner(request):
+    """Mobile-friendly stock barcode scanner page."""
+    return render(request, 'timesheet/stock_scanner.html')
+
+
+@login_required
+@require_GET
+def stock_scanner_recent(request):
+    """Return recent inventory scans for the history list."""
+    limit = min(int(request.GET.get('limit', 50)), 200)
+    scans = InventoryScan.objects.all()[:limit]
+    return JsonResponse({'scans': [_scan_to_dict(s) for s in scans]})
+
+
+@login_required
+@require_POST
+def stock_scanner_save(request):
+    """Parse and save a scanned barcode."""
+    try:
+        payload = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse(
+            {'success': False, 'message': 'Invalid JSON body'},
+            status=400,
+        )
+
+    raw = (payload.get('barcode') or '').strip()
+    if not raw:
+        return JsonResponse(
+            {'success': False, 'message': 'Barcode is required'},
+            status=400,
+        )
+
+    try:
+        fields = parse_barcode(raw)
+    except ValueError as exc:
+        return JsonResponse(
+            {'success': False, 'message': str(exc)},
+            status=400,
+        )
+
+    scan = InventoryScan.objects.create(raw_barcode=raw, **fields)
+    return JsonResponse({
+        'success': True,
+        'message': 'Scan saved',
+        'scan': _scan_to_dict(scan),
+    })
+
+
+@login_required
+@require_POST
+def stock_scanner_delete(request, scan_id):
+    """Delete a saved inventory scan."""
+    try:
+        scan = InventoryScan.objects.get(pk=scan_id)
+    except InventoryScan.DoesNotExist:
+        return JsonResponse(
+            {'success': False, 'message': 'Scan not found'},
+            status=404,
+        )
+
+    scan.delete()
+    return JsonResponse({'success': True, 'message': 'Scan deleted'})

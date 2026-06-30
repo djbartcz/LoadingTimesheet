@@ -28,6 +28,12 @@ urlpatterns = [
     path('admin-dashboard/', views.admin_dashboard, name='admin_dashboard'),
     path('admin-dashboard/sync/', views.sync_to_excel, name='sync_to_excel'),
     path('admin-dashboard/export/', views.export_to_excel, name='export_to_excel'),
+    path('detail-dashboard/', views.detail_dashboard, name='detail_dashboard'),
+    path(
+        'detail-dashboard/refresh/',
+        views.detail_dashboard_refresh,
+        name='detail_dashboard_refresh',
+    ),
     path('admin-control/', views.admin_control_panel, name='admin_control_panel'),
     path('admin-control/save/', views.save_master_data, name='save_master_data'),
     path(
@@ -75,4 +81,20 @@ urlpatterns = [
     path('edit-records/delete/', views.delete_time_record, name='delete_time_record'),
     path('edit-records/topup-preview/', views.topup_preview, name='topup_preview'),
     path('edit-records/topup-apply/', views.topup_apply, name='topup_apply'),
+    path('stock-scanner/', views.stock_scanner, name='stock_scanner'),
+    path(
+        'stock-scanner/recent/',
+        views.stock_scanner_recent,
+        name='stock_scanner_recent',
+    ),
+    path(
+        'stock-scanner/save/',
+        views.stock_scanner_save,
+        name='stock_scanner_save',
+    ),
+    path(
+        'stock-scanner/delete/<int:scan_id>/',
+        views.stock_scanner_delete,
+        name='stock_scanner_delete',
+    ),
 ]

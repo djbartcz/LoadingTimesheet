@@ -1,0 +1,703 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="csrf-token" content="{{ csrf_token }}">
+    <title>Stock Scanner</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        html, body {
+            height: 100%;
+            overflow: hidden;
+        }
+
+        .scanner-reader {
+            width: 100%;
+            max-width: 480px;
+            margin: 0 auto;
+            height: clamp(240px, 40vh, 480px);
+            min-height: 240px;
+            position: relative;
+        }
+
+        .scanner-reader video {
+            width: 100% !important;
+            height: 100% !important;
+            border-radius: 0.75rem;
+            object-fit: cover;
+        }
+
+        #reader {
+            width: 100%;
+            height: 100%;
+        }
+
+        #reader__dashboard_section_csr {
+            border: none !important;
+            padding: 0 !important;
+        }
+
+        #reader__dashboard_section_csr > div {
+            border: none !important;
+        }
+
+        #reader img[alt="Info icon"] {
+            display: none;
+        }
+
+        #reader button {
+            font-size: 0.875rem;
+        }
+
+        .scan-history-scroll {
+            -webkit-overflow-scrolling: touch;
+            overscroll-behavior: contain;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 h-full">
+    <div id="app" class="h-full flex flex-col max-w-xl mx-auto bg-gray-100">
+        <!-- Header -->
+        <header class="bg-white border-b border-gray-200 shadow-sm px-4 py-3 flex-shrink-0">
+            <div class="flex items-center justify-between gap-3">
+                <div class="min-w-0">
+                    <h1 class="text-lg font-semibold text-gray-900">Stock Scanner</h1>
+                    <p id="statusText" class="text-sm text-gray-500 truncate">Loading…</p>
+                </div>
+                <a href="{% url 'admin_dashboard' %}"
+                   class="flex-shrink-0 inline-flex items-center px-3 py-2 rounded-md border border-gray-300 bg-white text-sm font-medium text-gray-700 hover:bg-gray-50">
+                    Back
+                </a>
+            </div>
+        </header>
+
+        <div id="cameraError" class="hidden flex-shrink-0 mx-3 mt-3 text-left bg-red-50 border border-red-200 rounded-xl p-4 text-sm text-red-800">
+            <p id="cameraErrorText" class="font-medium mb-2"></p>
+            <button id="retryBtn" type="button"
+                    class="w-full py-2.5 px-4 bg-red-600 text-white font-medium rounded-lg hover:bg-red-700">
+                Try Again
+            </button>
+        </div>
+
+        <!-- List-only screen (when not scanning) -->
+        <section id="listScreen" class="flex-1 flex flex-col min-h-0">
+            <div class="px-4 py-3 flex-shrink-0 bg-white border-b border-gray-200">
+                <button id="startBtn" type="button"
+                        class="w-full py-3.5 px-6 bg-blue-600 text-white text-base font-semibold rounded-xl shadow hover:bg-blue-700 active:bg-blue-800 transition-colors disabled:opacity-60">
+                    Start Scanning
+                </button>
+            </div>
+            <div class="px-4 py-2 flex-shrink-0 bg-gray-50 border-b border-gray-200">
+                <h2 class="text-sm font-semibold text-gray-800">Scanned Items</h2>
+                <p class="text-xs text-gray-500">Tap an item to view details</p>
+            </div>
+            <div id="listHistory" class="scan-history-scroll flex-1 min-h-0 overflow-y-auto p-3 space-y-2 bg-white">
+                <p id="emptyListHistory" class="text-sm text-gray-400 text-center py-12">No scans yet</p>
+            </div>
+        </section>
+
+        <!-- Scanner screen (camera + scrollable list) -->
+        <section id="scannerScreen" class="hidden flex-1 flex flex-col min-h-0 overflow-hidden">
+            <div class="p-3 flex-shrink-0 bg-white border-b border-gray-200">
+                <div class="relative">
+                    <div id="reader" class="scanner-reader rounded-xl overflow-hidden border-2 border-gray-300 bg-black"></div>
+                    <div id="cameraLoading" class="hidden absolute inset-0 rounded-xl bg-black/80 flex flex-col items-center justify-center text-white p-4 z-10">
+                        <div class="animate-spin rounded-full h-8 w-8 border-2 border-white border-t-transparent mb-3"></div>
+                        <p class="text-sm font-medium text-center">Starting camera…</p>
+                        <p class="text-xs text-gray-300 text-center mt-1">Allow camera access if prompted</p>
+                        <button id="cancelCameraBtn" type="button"
+                                class="mt-4 px-4 py-2 text-sm font-medium bg-white/20 hover:bg-white/30 rounded-lg">
+                            Cancel
+                        </button>
+                    </div>
+                </div>
+                <button id="stopBtn" type="button"
+                        class="mt-3 w-full py-2.5 px-4 border border-gray-300 bg-white text-sm font-medium text-gray-700 rounded-lg hover:bg-gray-50">
+                    Stop Scanning
+                </button>
+            </div>
+
+            <div class="px-4 py-2 flex-shrink-0 bg-gray-50 border-b border-gray-200">
+                <h2 class="text-sm font-semibold text-gray-800">Scanned Items</h2>
+                <p class="text-xs text-gray-500">Scroll while scanning · tap to view · trash to delete</p>
+            </div>
+            <div id="scanHistory" class="scan-history-scroll flex-1 min-h-0 overflow-y-auto p-3 space-y-2 bg-white">
+                <p id="emptyHistory" class="text-sm text-gray-400 text-center py-8">No scans yet</p>
+            </div>
+        </section>
+    </div>
+
+    <!-- Scanned item modal (save new scan or view saved item) -->
+    <div id="confirmModal" class="hidden fixed inset-0 z-50 flex items-end sm:items-center justify-center">
+        <div class="absolute inset-0 bg-black/50" id="modalBackdrop"></div>
+        <div class="relative w-full max-w-lg bg-white rounded-t-2xl sm:rounded-2xl shadow-xl mx-auto max-h-[85vh] overflow-y-auto">
+            <div class="p-5">
+                <h3 class="text-lg font-semibold text-gray-900 mb-1">Scanned Item</h3>
+                <p id="modalSubtitle" class="text-sm text-gray-500 mb-4">Review and save to inventory</p>
+                <dl id="scanFields" class="space-y-2 text-sm mb-5"></dl>
+                <div id="modalSaveActions" class="flex gap-3">
+                    <button id="cancelBtn" type="button"
+                            class="flex-1 py-3 px-4 border border-gray-300 bg-white text-gray-700 font-medium rounded-xl hover:bg-gray-50">
+                        Cancel
+                    </button>
+                    <button id="saveBtn" type="button"
+                            class="flex-1 py-3 px-4 bg-green-600 text-white font-semibold rounded-xl hover:bg-green-700">
+                        Save
+                    </button>
+                </div>
+                <button id="modalCloseBtn" type="button"
+                        class="hidden w-full py-3 px-4 border border-gray-300 bg-white text-gray-700 font-medium rounded-xl hover:bg-gray-50">
+                    Close
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast -->
+    <div id="toast"
+         class="hidden fixed bottom-6 left-1/2 -translate-x-1/2 z-[60] px-4 py-2.5 rounded-lg shadow-lg text-sm font-medium text-white max-w-xs text-center"></div>
+
+    <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+    <script>
+        window.STOCK_SCANNER_URLS = {
+            save: "{% url 'stock_scanner_save' %}",
+            recent: "{% url 'stock_scanner_recent' %}",
+            deleteBase: "{% url 'stock_scanner_delete' 0 %}".replace('/0/', '/'),
+        };
+    </script>
+    <script>
+    (function () {
+        'use strict';
+
+        function getBarcodeFormats() {
+            if (typeof Html5QrcodeSupportedFormats === 'undefined') return undefined;
+            return [
+                Html5QrcodeSupportedFormats.QR_CODE,
+                Html5QrcodeSupportedFormats.CODE_128,
+                Html5QrcodeSupportedFormats.CODE_39,
+                Html5QrcodeSupportedFormats.CODE_93,
+                Html5QrcodeSupportedFormats.EAN_13,
+                Html5QrcodeSupportedFormats.EAN_8,
+                Html5QrcodeSupportedFormats.UPC_A,
+                Html5QrcodeSupportedFormats.UPC_E,
+                Html5QrcodeSupportedFormats.ITF,
+                Html5QrcodeSupportedFormats.DATA_MATRIX,
+            ];
+        }
+
+        function initStockScanner() {
+            const urls = window.STOCK_SCANNER_URLS;
+            const listScreen = document.getElementById('listScreen');
+            const scannerScreen = document.getElementById('scannerScreen');
+            const startBtn = document.getElementById('startBtn');
+            const stopBtn = document.getElementById('stopBtn');
+            const retryBtn = document.getElementById('retryBtn');
+            const cameraError = document.getElementById('cameraError');
+            const cameraErrorText = document.getElementById('cameraErrorText');
+            const cameraLoading = document.getElementById('cameraLoading');
+            const cancelCameraBtn = document.getElementById('cancelCameraBtn');
+            const statusText = document.getElementById('statusText');
+            const confirmModal = document.getElementById('confirmModal');
+            const modalBackdrop = document.getElementById('modalBackdrop');
+            const modalSubtitle = document.getElementById('modalSubtitle');
+            const scanFields = document.getElementById('scanFields');
+            const modalSaveActions = document.getElementById('modalSaveActions');
+            const cancelBtn = document.getElementById('cancelBtn');
+            const saveBtn = document.getElementById('saveBtn');
+            const modalCloseBtn = document.getElementById('modalCloseBtn');
+            const scanHistory = document.getElementById('scanHistory');
+            const listHistory = document.getElementById('listHistory');
+            const emptyHistory = document.getElementById('emptyHistory');
+            const emptyListHistory = document.getElementById('emptyListHistory');
+            const toast = document.getElementById('toast');
+
+            if (!urls || !startBtn || !statusText || !listScreen || !scannerScreen) {
+                if (statusText) statusText.textContent = 'Scanner init failed';
+                return;
+            }
+
+            let html5QrCode = null;
+            let pendingBarcode = null;
+            let modalOpen = false;
+            let modalMode = 'save';
+            let isScanning = false;
+            let isStarting = false;
+            let lastCode = '';
+            let lastCodeTime = 0;
+            let cachedScans = [];
+            const DEBOUNCE_MS = 2500;
+
+            function deleteUrl(scanId) {
+                return urls.deleteBase + scanId + '/';
+            }
+
+            function getCsrfToken() {
+                const meta = document.querySelector('meta[name="csrf-token"]');
+                if (meta) return meta.getAttribute('content');
+                const match = document.cookie.match(/csrftoken=([^;]+)/);
+                return match ? decodeURIComponent(match[1]) : '';
+            }
+
+            function waitForNextPaint() {
+                return new Promise(function (resolve) {
+                    requestAnimationFrame(function () {
+                        requestAnimationFrame(function () {
+                            setTimeout(resolve, 150);
+                        });
+                    });
+                });
+            }
+
+            function withTimeout(promise, ms, message) {
+                return Promise.race([
+                    promise,
+                    new Promise(function (_, reject) {
+                        setTimeout(function () {
+                            reject(new Error(message));
+                        }, ms);
+                    }),
+                ]);
+            }
+
+            function resetReaderElement() {
+                const readerEl = document.getElementById('reader');
+                if (readerEl) readerEl.innerHTML = '';
+            }
+
+            async function cleanupScanner() {
+                if (!html5QrCode) return;
+                try {
+                    await html5QrCode.stop();
+                } catch (e) {
+                    // ignore
+                }
+                try {
+                    html5QrCode.clear();
+                } catch (e) {
+                    // ignore
+                }
+                html5QrCode = null;
+                resetReaderElement();
+            }
+
+            function showToast(message, isError) {
+                if (!toast) return;
+                toast.textContent = message;
+                toast.className =
+                    'fixed bottom-6 left-1/2 -translate-x-1/2 z-[60] px-4 py-2.5 rounded-lg shadow-lg text-sm font-medium text-white max-w-xs text-center ' +
+                    (isError ? 'bg-red-600' : 'bg-green-600');
+                toast.classList.remove('hidden');
+                setTimeout(function () { toast.classList.add('hidden'); }, 3000);
+            }
+
+            function formatFieldLabel(key) {
+                return key.replace(/_/g, ' ').replace(/\b\w/g, function (c) { return c.toUpperCase(); });
+            }
+
+            function escapeHtml(value) {
+                const div = document.createElement('div');
+                div.textContent = value == null ? '' : String(value);
+                return div.innerHTML;
+            }
+
+            function parseBarcode(raw) {
+                const parts = raw.split(';').map(function (p) { return p.trim(); });
+                while (parts.length && parts[parts.length - 1] === '') parts.pop();
+                if (parts.length === 6) {
+                    return {
+                        part_no: parts[0], part_description: parts[1], lot_no: parts[2],
+                        wdr: parts[3], length: parts[4], width: null, handling_unit: parts[5],
+                    };
+                }
+                if (parts.length === 7) {
+                    return {
+                        part_no: parts[0], part_description: parts[1], lot_no: parts[2],
+                        wdr: parts[3], length: parts[4], width: parts[5], handling_unit: parts[6],
+                    };
+                }
+                throw new Error('Expected 6 or 7 fields, got ' + parts.length);
+            }
+
+            function fieldsToHtml(fields) {
+                return Object.entries(fields)
+                    .filter(function (e) { return e[1] !== null && e[1] !== ''; })
+                    .map(function (e) {
+                        return '<div class="flex justify-between gap-4 py-1 border-b border-gray-100">' +
+                            '<dt class="text-gray-500">' + formatFieldLabel(e[0]) + '</dt>' +
+                            '<dd class="font-medium text-gray-900 text-right break-all">' + escapeHtml(String(e[1])) + '</dd></div>';
+                    }).join('');
+            }
+
+            function scanToFields(scan) {
+                return {
+                    part_no: scan.part_no,
+                    part_description: scan.part_description,
+                    lot_no: scan.lot_no,
+                    wdr: scan.wdr,
+                    length: scan.length,
+                    width: scan.width,
+                    handling_unit: scan.handling_unit,
+                };
+            }
+
+            function updateStatusText() {
+                if (modalOpen) {
+                    statusText.textContent = modalMode === 'save' ? 'Review scan' : 'Viewing item';
+                } else if (isScanning) {
+                    statusText.textContent = 'Scanning…';
+                } else {
+                    statusText.textContent = cachedScans.length + ' item(s)';
+                }
+            }
+
+            function setModalMode(mode) {
+                modalMode = mode;
+                if (mode === 'save') {
+                    modalSubtitle.textContent = 'Review and save to inventory';
+                    modalSaveActions.classList.remove('hidden');
+                    modalCloseBtn.classList.add('hidden');
+                } else {
+                    modalSaveActions.classList.add('hidden');
+                    modalCloseBtn.classList.remove('hidden');
+                }
+            }
+
+            function buildScanItemHtml(scan) {
+                const when = scan.scanned_at ? new Date(scan.scanned_at).toLocaleString() : '';
+                return (
+                    '<div class="scan-item flex items-stretch gap-2 bg-gray-50 border border-gray-200 rounded-xl overflow-hidden cursor-pointer hover:border-gray-300 active:bg-gray-100 transition-colors" data-id="' + scan.id + '">' +
+                        '<div class="scan-item-body flex-1 min-w-0 p-3">' +
+                            '<div class="font-semibold text-gray-900 truncate">' + escapeHtml(scan.part_no || '') + '</div>' +
+                            '<div class="text-gray-600 text-xs mt-1 truncate">' + escapeHtml(scan.part_description || '') + '</div>' +
+                            '<div class="flex flex-wrap gap-x-3 gap-y-1 mt-2 text-xs text-gray-500">' +
+                                '<span>Lot: ' + escapeHtml(scan.lot_no || '-') + '</span>' +
+                                '<span>HU: ' + escapeHtml(scan.handling_unit || '-') + '</span>' +
+                            '</div>' +
+                            '<div class="text-xs text-gray-400 mt-1">' + escapeHtml(when) + '</div>' +
+                        '</div>' +
+                        '<button type="button" class="scan-delete-btn flex-shrink-0 w-16 sm:w-20 bg-red-600 hover:bg-red-700 active:bg-red-800 text-white flex items-center justify-center transition-colors" aria-label="Delete scan">' +
+                            '<svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">' +
+                                '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>' +
+                            '</svg>' +
+                        '</button>' +
+                    '</div>'
+                );
+            }
+
+            function bindHistoryContainer(container) {
+                container.querySelectorAll('.scan-item').forEach(function (item) {
+                    item.addEventListener('click', function (event) {
+                        if (event.target.closest('.scan-delete-btn')) return;
+                        const scanId = parseInt(item.getAttribute('data-id'), 10);
+                        showSavedItemModal(scanId);
+                    });
+                });
+                container.querySelectorAll('.scan-delete-btn').forEach(function (btn) {
+                    btn.addEventListener('click', function (event) {
+                        event.stopPropagation();
+                        const item = btn.closest('.scan-item');
+                        const scanId = parseInt(item.getAttribute('data-id'), 10);
+                        deleteScan(scanId);
+                    });
+                });
+            }
+
+            function renderIntoContainer(container, emptyEl, scans) {
+                container.querySelectorAll('.scan-item').forEach(function (el) { el.remove(); });
+                if (!scans.length) {
+                    emptyEl.classList.remove('hidden');
+                    return;
+                }
+                emptyEl.classList.add('hidden');
+                scans.forEach(function (scan) {
+                    const wrapper = document.createElement('div');
+                    wrapper.innerHTML = buildScanItemHtml(scan);
+                    container.appendChild(wrapper.firstElementChild);
+                });
+                bindHistoryContainer(container);
+            }
+
+            function renderHistory(scans) {
+                cachedScans = scans || [];
+                renderIntoContainer(listHistory, emptyListHistory, cachedScans);
+                renderIntoContainer(scanHistory, emptyHistory, cachedScans);
+                updateStatusText();
+            }
+
+            function showSavedItemModal(scanId) {
+                const scan = cachedScans.find(function (s) { return s.id === scanId; });
+                if (!scan) return;
+                pendingBarcode = null;
+                modalOpen = true;
+                setModalMode('view');
+                scanFields.innerHTML = fieldsToHtml(scanToFields(scan));
+                modalSubtitle.textContent = scan.scanned_at
+                    ? 'Scanned: ' + new Date(scan.scanned_at).toLocaleString()
+                    : 'Saved item details';
+                confirmModal.classList.remove('hidden');
+                updateStatusText();
+            }
+
+            function showConfirmModal(raw) {
+                let fields;
+                try { fields = parseBarcode(raw); }
+                catch (err) { showToast(err.message, true); return; }
+                pendingBarcode = raw;
+                modalOpen = true;
+                setModalMode('save');
+                scanFields.innerHTML = fieldsToHtml(fields);
+                modalSubtitle.textContent = 'Review and save to inventory';
+                confirmModal.classList.remove('hidden');
+                updateStatusText();
+            }
+
+            function hideConfirmModal() {
+                confirmModal.classList.add('hidden');
+                pendingBarcode = null;
+                modalOpen = false;
+                setModalMode('save');
+                updateStatusText();
+            }
+
+            async function loadRecent() {
+                try {
+                    const response = await fetch(urls.recent);
+                    const data = await response.json();
+                    renderHistory(data.scans || []);
+                } catch (err) {
+                    console.error(err);
+                    showToast('Failed to load scans', true);
+                }
+            }
+
+            async function saveScan() {
+                if (!pendingBarcode) return;
+                saveBtn.disabled = true;
+                try {
+                    const response = await fetch(urls.save, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCsrfToken() },
+                        body: JSON.stringify({ barcode: pendingBarcode }),
+                    });
+                    const data = await response.json();
+                    if (!response.ok || !data.success) throw new Error(data.message || 'Save failed');
+                    showToast(data.message || 'Scan saved');
+                    hideConfirmModal();
+                    await loadRecent();
+                } catch (err) {
+                    showToast(err.message || 'Save failed', true);
+                } finally {
+                    saveBtn.disabled = false;
+                }
+            }
+
+            async function deleteScan(scanId) {
+                if (!confirm('Delete this scanned item?')) return;
+                try {
+                    const response = await fetch(deleteUrl(scanId), {
+                        method: 'POST',
+                        headers: { 'X-CSRFToken': getCsrfToken() },
+                    });
+                    const data = await response.json();
+                    if (!response.ok || !data.success) throw new Error(data.message || 'Delete failed');
+                    showToast(data.message || 'Deleted');
+                    if (modalOpen) hideConfirmModal();
+                    await loadRecent();
+                } catch (err) {
+                    showToast(err.message || 'Delete failed', true);
+                }
+            }
+
+            function onScanSuccess(decodedText) {
+                if (modalOpen) return;
+                const now = Date.now();
+                const trimmed = decodedText.trim();
+                if (trimmed === lastCode && now - lastCodeTime < DEBOUNCE_MS) return;
+                lastCode = trimmed;
+                lastCodeTime = now;
+                showConfirmModal(trimmed);
+            }
+
+            function ensureCameraSupport() {
+                if (!window.isSecureContext) {
+                    throw new Error('Camera requires HTTPS or localhost.');
+                }
+                if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                    throw new Error('Camera is not supported in this browser.');
+                }
+            }
+
+            async function startCameraScanner() {
+                ensureCameraSupport();
+                await cleanupScanner();
+                await waitForNextPaint();
+
+                const formats = getBarcodeFormats();
+                const opts = formats ? { formatsToSupport: formats, verbose: false } : undefined;
+                const config = {
+                    fps: 10,
+                    qrbox: function (w, h) {
+                        const size = Math.floor(Math.min(w, h) * 0.85);
+                        return {
+                            width: Math.max(size, 180),
+                            height: Math.max(size, 180),
+                        };
+                    },
+                    aspectRatio: 1.0,
+                };
+
+                const cameraConfigs = [
+                    { facingMode: 'environment' },
+                    { facingMode: 'user' },
+                ];
+
+                let lastError = null;
+                for (let i = 0; i < cameraConfigs.length; i += 1) {
+                    html5QrCode = new Html5Qrcode('reader', opts);
+                    try {
+                        await withTimeout(
+                            html5QrCode.start(
+                                cameraConfigs[i],
+                                config,
+                                onScanSuccess,
+                                function () {}
+                            ),
+                            20000,
+                            'Camera start timed out. Allow camera access and try again.'
+                        );
+                        return;
+                    } catch (err) {
+                        lastError = err;
+                        await cleanupScanner();
+                    }
+                }
+
+                const cameras = await Html5Qrcode.getCameras();
+                if (!cameras || !cameras.length) {
+                    throw lastError || new Error('No camera found on this device');
+                }
+
+                const preferred = cameras.find(function (c) {
+                    return /back|rear|environment/i.test(c.label || '');
+                });
+                const cameraId = (preferred || cameras[0]).id;
+
+                html5QrCode = new Html5Qrcode('reader', opts);
+                await withTimeout(
+                    html5QrCode.start(
+                        cameraId,
+                        config,
+                        onScanSuccess,
+                        function () {}
+                    ),
+                    20000,
+                    'Camera start timed out. Allow camera access and try again.'
+                );
+            }
+
+            function showCameraError(err) {
+                cameraLoading.classList.add('hidden');
+                isScanning = false;
+                scannerScreen.classList.add('hidden');
+                listScreen.classList.remove('hidden');
+                cameraError.classList.remove('hidden');
+                let message = (err && err.message) ? err.message : 'Could not access camera';
+                if (err && err.name === 'NotAllowedError') {
+                    message = 'Camera permission denied. Allow camera access and try again.';
+                } else if (err && err.name === 'NotFoundError') {
+                    message = 'No camera found on this device.';
+                } else if (err && err.name === 'NotReadableError') {
+                    message = 'Camera is already in use by another application.';
+                }
+                cameraErrorText.textContent = message;
+                showToast(message, true);
+                updateStatusText();
+            }
+
+            function showListScreen() {
+                listScreen.classList.remove('hidden');
+                scannerScreen.classList.add('hidden');
+                isScanning = false;
+                updateStatusText();
+            }
+
+            function showScannerScreen() {
+                listScreen.classList.add('hidden');
+                scannerScreen.classList.remove('hidden');
+                isScanning = true;
+                updateStatusText();
+            }
+
+            async function startScanner() {
+                if (isStarting) return;
+                isStarting = true;
+                startBtn.disabled = true;
+                cameraError.classList.add('hidden');
+                cameraLoading.classList.remove('hidden');
+                showScannerScreen();
+                statusText.textContent = 'Starting camera…';
+
+                try {
+                    if (typeof Html5Qrcode === 'undefined') {
+                        throw new Error('Scanner library failed to load.');
+                    }
+                    await startCameraScanner();
+                    cameraLoading.classList.add('hidden');
+                    await loadRecent();
+                    updateStatusText();
+                } catch (err) {
+                    console.error('Camera start failed:', err);
+                    await cleanupScanner();
+                    showCameraError(err);
+                } finally {
+                    isStarting = false;
+                    startBtn.disabled = false;
+                    cameraLoading.classList.add('hidden');
+                }
+            }
+
+            async function stopScanner() {
+                await cleanupScanner();
+                hideConfirmModal();
+                showListScreen();
+                await loadRecent();
+            }
+
+            async function cancelCameraStart() {
+                await cleanupScanner();
+                cameraLoading.classList.add('hidden');
+                isStarting = false;
+                startBtn.disabled = false;
+                showListScreen();
+                statusText.textContent = cachedScans.length + ' item(s)';
+            }
+
+            startBtn.addEventListener('click', function (e) {
+                e.preventDefault();
+                startScanner();
+            });
+            stopBtn.addEventListener('click', stopScanner);
+            cancelCameraBtn.addEventListener('click', cancelCameraStart);
+            retryBtn.addEventListener('click', function () {
+                cameraError.classList.add('hidden');
+                startScanner();
+            });
+            cancelBtn.addEventListener('click', hideConfirmModal);
+            modalBackdrop.addEventListener('click', hideConfirmModal);
+            modalCloseBtn.addEventListener('click', hideConfirmModal);
+            saveBtn.addEventListener('click', saveScan);
+
+            loadRecent();
+        }
+
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', initStockScanner);
+        } else {
+            initStockScanner();
+        }
+    })();
+    </script>
+</body>
+</html>

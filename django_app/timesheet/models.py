@@ -114,6 +114,7 @@ class IfsOperationHistory(models.Model):
     transaction_code = models.CharField(max_length=50, blank=True, null=True)
     empno = models.CharField(max_length=50, blank=True, null=True)
     employee_name = models.CharField(max_length=255, blank=True, null=True)
+    created_by_employee_id = models.CharField(max_length=50, blank=True, null=True)
     order_no = models.CharField(max_length=50, blank=True, null=True)
     work_center_no = models.CharField(max_length=50, blank=True, null=True)
     work_center_description = models.CharField(
@@ -125,6 +126,12 @@ class IfsOperationHistory(models.Model):
         max_digits=12, decimal_places=4, blank=True, null=True
     )
     man_hours = models.DecimalField(
+        max_digits=12, decimal_places=4, blank=True, null=True
+    )
+    manufacturing_time = models.DecimalField(
+        max_digits=12, decimal_places=4, blank=True, null=True
+    )
+    resource_hours = models.DecimalField(
         max_digits=12, decimal_places=4, blank=True, null=True
     )
     transaction_date = models.DateTimeField(blank=True, null=True)
@@ -147,6 +154,67 @@ class IfsOperationHistory(models.Model):
 
     def __str__(self):
         return f"OpHist {self.transaction_id}"
+
+
+class IfsEmployeeDirectory(models.Model):
+    """Lightweight employee directory from IFS for name lookup by EmpNo."""
+    emp_no = models.CharField(max_length=50, primary_key=True)
+    company_id = models.CharField(max_length=50, blank=True, null=True)
+    employee_status = models.CharField(max_length=50, blank=True, null=True)
+    first_name = models.CharField(max_length=255, blank=True, null=True)
+    last_name = models.CharField(max_length=255, blank=True, null=True)
+    internal_display_name = models.CharField(max_length=255, blank=True, null=True)
+    external_display_name = models.CharField(max_length=255, blank=True, null=True)
+    fetched_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'ifs_employee_directory'
+        indexes = [
+            models.Index(fields=['company_id']),
+            models.Index(fields=['employee_status']),
+        ]
+
+    def __str__(self):
+        return f"Emp {self.emp_no}"
+
+
+class IfsShopOperClocking(models.Model):
+    """Shop floor clocking records used by Daily Labour report."""
+    clocking_seq = models.BigIntegerField(primary_key=True)
+    company = models.CharField(max_length=50, blank=True, null=True)
+    order_no = models.CharField(max_length=50, blank=True, null=True)
+    operation_no = models.IntegerField(blank=True, null=True)
+    transaction_id = models.BigIntegerField(blank=True, null=True)
+    transaction_date = models.DateField(blank=True, null=True)
+    employee_id = models.CharField(max_length=50, blank=True, null=True)
+    employee_name = models.CharField(max_length=255, blank=True, null=True)
+    created_by_employee_id = models.CharField(max_length=50, blank=True, null=True)
+    clocking_type = models.CharField(max_length=50, blank=True, null=True)
+    work_center_no = models.CharField(max_length=50, blank=True, null=True)
+    part_no = models.CharField(max_length=100, blank=True, null=True)
+    part_description = models.CharField(max_length=500, blank=True, null=True)
+    crew_size = models.DecimalField(
+        max_digits=10, decimal_places=2, blank=True, null=True
+    )
+    operation_qty = models.DecimalField(
+        max_digits=14, decimal_places=4, blank=True, null=True
+    )
+    duration = models.DecimalField(
+        max_digits=14, decimal_places=4, blank=True, null=True
+    )
+    fetched_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'ifs_shop_oper_clocking'
+        indexes = [
+            models.Index(fields=['transaction_date']),
+            models.Index(fields=['employee_id']),
+            models.Index(fields=['created_by_employee_id']),
+            models.Index(fields=['order_no']),
+        ]
+
+    def __str__(self):
+        return f"Clocking {self.clocking_seq}"
 
 
 class IfsShopOrd(models.Model):
@@ -321,6 +389,11 @@ class IfsReportData(models.Model):
     sequence_no = models.CharField(max_length=50, blank=True, null=True)
     contract = models.CharField(max_length=50, blank=True, null=True)
 
+    work_center_no = models.CharField(max_length=50, blank=True, null=True)
+    work_center_description = models.CharField(
+        max_length=255, blank=True, null=True
+    )
+    oper_status_code = models.CharField(max_length=50, blank=True, null=True)
     labor_part_no = models.CharField(max_length=100, blank=True, null=True)
     labor_time = models.DecimalField(
         max_digits=12, decimal_places=4, blank=True, null=True
@@ -366,3 +439,34 @@ class IfsReportData(models.Model):
 
     def __str__(self):
         return f"Report {self.transaction_id}"
+
+
+class InventoryScan(models.Model):
+    """Barcode scan record from stock scanner."""
+
+    part_no = models.CharField(max_length=200, db_column='PART_NO')
+    part_description = models.CharField(
+        max_length=500, blank=True, default='', db_column='PART_DESCRIPTION'
+    )
+    lot_no = models.CharField(
+        max_length=200, blank=True, default='', db_column='LOT_NO'
+    )
+    wdr = models.CharField(max_length=50, blank=True, default='', db_column='WDR')
+    length = models.CharField(
+        max_length=100, blank=True, default='', db_column='LENGTH'
+    )
+    width = models.CharField(
+        max_length=100, blank=True, null=True, db_column='WIDTH'
+    )
+    handling_unit = models.CharField(
+        max_length=100, blank=True, default='', db_column='HANDLING_UNIT'
+    )
+    raw_barcode = models.TextField(blank=True, default='')
+    scanned_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        db_table = 'inventory_scan'
+        ordering = ['-scanned_at']
+
+    def __str__(self):
+        return f"{self.part_no} / {self.lot_no}"

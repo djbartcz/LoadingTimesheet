@@ -2,7 +2,17 @@ from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from django.contrib.auth.models import User, Group
 
-# Register your models here.
+from .models import InventoryScan
+
+
+@admin.register(InventoryScan)
+class InventoryScanAdmin(admin.ModelAdmin):
+    list_display = (
+        'part_no', 'lot_no', 'handling_unit', 'wdr', 'length', 'scanned_at',
+    )
+    list_filter = ('scanned_at',)
+    search_fields = ('part_no', 'lot_no', 'handling_unit', 'raw_barcode')
+    readonly_fields = ('scanned_at',)
 
 # Unregister the default User admin and register our custom one
 admin.site.unregister(User)

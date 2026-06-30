@@ -1,0 +1,28 @@
+.scanner-reader {
+    width: 100%;
+    min-height: 260px;
+    position: relative;
+}
+
+.scanner-reader video {
+    width: 100% !important;
+    border-radius: 0.75rem;
+    object-fit: cover;
+}
+
+#reader__dashboard_section_csr {
+    border: none !important;
+    padding: 0 !important;
+}
+
+#reader__dashboard_section_csr > div {
+    border: none !important;
+}
+
+#reader img[alt="Info icon"] {
+    display: none;
+}
+
+#reader button {
+    font-size: 0.875rem;
+}
